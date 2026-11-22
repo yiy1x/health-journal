@@ -1,0 +1,35 @@
+name: 软件缺陷（仅合成资料）
+description: 反馈页面、存储或功能问题；不是医疗咨询渠道
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: "请勿上传真实病历、报告图片、API Key、完整备份或身份信息。安全漏洞请先阅读 SECURITY.md，勿在此公开利用细节。"
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我确认复现只含合成数据，不含真实健康资料、个人标识或密钥。
+          required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境
+      description: 应用版本、操作系统、Python、浏览器版本；不要写真实用户名或目录。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 最小复现步骤
+      description: 描述具体页面、点击顺序、是否多窗口或后台请求；只使用合成内容。
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: 预期与实际结果
+      description: 错误文案、是否可重复，以及数据是否保存。截图须完全合成。
+    validations:
+      required: true
