@@ -7,6 +7,13 @@ const core = require('../health_journal/web/phone/core.js');
 
 const source = fs.readFileSync(path.join(__dirname, '../health_journal/web/phone/phone.js'), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
+async function waitFor(predicate) {
+  const deadline = Date.now() + 5000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for asynchronous phone operation');
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+}
 const sample = (name = '合成.txt', text = 'synthetic') => core.makeDocument(name, new TextEncoder().encode(text));
 
 async function harness() {
@@ -20,7 +27,7 @@ async function harness() {
   const root = element('#app'), sheet = element('#sheet'), location = { hash: '#capture' };
   Object.assign(sheet, { open: false, close() { this.open = false; }, showModal() { this.open = true; }, querySelector(selector) { return selector === '.error' ? error : element(selector); }, addEventListener(name, callback) { sheetListeners[name] = callback; } });
   root.querySelector = selector => selector === '.error' ? error : null;
-  let row = null, writeFailure = false, sealFailure = false, sealWait = null, opened = null;
+  let row = null, writeFailure = false, sealFailure = false, sealWait = null, opened = null, sealCalls = 0;
   const storage = {
     async read() { return row; },
     async write(envelope, revision) {
@@ -33,7 +40,7 @@ async function harness() {
   };
   const context = vm.createContext({
     console, TextEncoder, TextDecoder, Uint8Array, Blob, crypto, Date,
-    PhoneVaultCore: { ...core, async seal(documents) { if (sealWait) await sealWait; if (sealFailure) throw new Error('synthetic seal failure'); return { ciphertext: JSON.stringify(documents) }; }, async open() { if (!opened) throw new Error('synthetic wrong password'); return opened; } },
+    PhoneVaultCore: { ...core, async seal(documents) { sealCalls++; if (sealWait) await sealWait; if (sealFailure) throw new Error('synthetic seal failure'); return { ciphertext: JSON.stringify(documents) }; }, async open() { if (!opened) throw new Error('synthetic wrong password'); return opened; } },
     PhoneVaultDB: storage, location,
     URL: { createObjectURL: () => 'blob:synthetic-' + (revoked.length + 1), revokeObjectURL: url => revoked.push(url) },
     history: { replaceState(data, title, hash) { location.hash = hash; } },
@@ -55,6 +62,7 @@ async function harness() {
     emit(name, event) { for (const listener of listeners[name] || []) listener(event); },
     failWrite(value) { writeFailure = value; }, failSeal(value) { sealFailure = value; },
     waitSeal(value) { sealWait = value; }, setOpened(value) { opened = value; },
+    sealCalls() { return sealCalls; }, waitForIdle() { return waitFor(() => !run('state.busy')); },
     setRow(value) { row = value; }, row() { return row; },
   };
 }
@@ -100,7 +108,7 @@ test('phone persistence failure leaves prior snapshot, revision and note untouch
   const app = await harness(), document = await sample();
   app.run(`state.documents=${JSON.stringify([document])}; noteForm(); state.dirty=true`);
   app.failWrite(true);
-  submit(app, form('note-form', noteFields())); await tick(); await tick();
+  submit(app, form('note-form', noteFields())); await app.waitForIdle();
   assert.equal(app.run('state.documents.length'), 1);
   assert.equal(app.run('state.row'), null);
   assert.equal(app.run('state.dirty'), true);
@@ -116,17 +124,17 @@ test('phone encryption failure never writes plaintext or changes the saved snaps
 });
 test('phone saved note is idempotent and retains source disclaimer', async () => {
   const app = await harness(), fields = noteFields({ title: '合成早餐🥣' });
-  submit(app, form('note-form', fields)); await tick(); await tick();
+  submit(app, form('note-form', fields)); await app.waitForIdle();
   assert.equal(app.run('state.documents.length'), 1);
   assert.match(new TextDecoder().decode(core.unbase64(app.run('state.documents[0].content'), core.MAX_FILE)), /未经临床核实/);
-  submit(app, form('note-form', fields)); await tick(); await tick();
+  submit(app, form('note-form', fields)); await app.waitForIdle();
   assert.equal(app.run('state.documents.length'), 1);
   assert.equal(app.writes.length, 1);
 });
 test('phone invalid dates, future notes and malformed Unicode cannot be stored', async () => {
   for (const extra of [{ date: '2026-02-30' }, { date: '9999-01-01' }, { content: '\ud800' }, { title: '   ' }]) {
     const app = await harness();
-    submit(app, form('note-form', noteFields(extra))); await tick();
+    submit(app, form('note-form', noteFields(extra))); await app.waitForIdle();
     assert.equal(app.writes.length, 0);
     assert.match(app.error.textContent, /有效标题/);
   }
@@ -134,9 +142,9 @@ test('phone invalid dates, future notes and malformed Unicode cannot be stored',
 test('phone duplicate submit during encryption produces exactly one transaction', async () => {
   const app = await harness();
   let release; app.waitSeal(new Promise(resolve => { release = resolve; }));
-  submit(app, form('note-form', noteFields())); await tick();
+  submit(app, form('note-form', noteFields())); await waitFor(() => app.sealCalls() === 1);
   submit(app, form('note-form', noteFields()));
-  release(); await tick(); await tick();
+  release(); await app.waitForIdle();
   assert.equal(app.writes.length, 1);
 });
 test('phone partial batch failure retries only unsuccessful items', async () => {
