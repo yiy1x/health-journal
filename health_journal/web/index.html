@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="journal-token" content="__LOCAL_TOKEN__">
+  <meta name="theme-color" content="#253c58">
+  <title>知己 · 健康手记</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+  <div id="app"><div class="loading-screen"><span class="loading-mark">知</span><h1>正在打开本地档案</h1><p>资料只从这台设备读取。</p></div></div>
+  <dialog id="modal" aria-labelledby="modal-title"></dialog>
+  <dialog id="leave-modal" class="confirm-modal" aria-labelledby="leave-title">
+    <div class="modal-heading"><h2 id="leave-title">输入尚未保存</h2></div>
+    <div class="modal-body"><p id="leave-message"></p></div>
+    <div class="modal-footer"><button type="button" class="button secondary" id="leave-cancel" autofocus>继续编辑</button><button type="button" class="button primary" id="leave-confirm">放弃未保存输入</button></div>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <input id="file-upload" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" multiple hidden aria-label="选择原始资料">
+  <input id="camera-upload" type="file" accept="image/jpeg,image/png" capture="environment" hidden aria-label="拍摄原始资料">
+  <input id="album-upload" type="file" accept="image/jpeg,image/png" multiple hidden aria-label="选择相册照片">
+  <input id="transfer-upload" type="file" accept=".json" hidden aria-label="导入手机资料包">
+  <input id="restore-upload" type="file" accept=".zip" hidden aria-label="选择备份文件">
+  <input id="ai-upload" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" hidden aria-label="选择待分析的本地资料">
+  <noscript>请启用 JavaScript。所有脚本均随项目本地提供，无外部 CDN。</noscript>
+</body>
+</html>
