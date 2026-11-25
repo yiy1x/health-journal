@@ -128,6 +128,30 @@ class CloudTests(unittest.TestCase):
         self.assertFalse(self.cloud.config()["has_key"])
         self.assertEqual(self.cloud.pending, {})
         self.configure()
+
+    def test_request_completion_falls_back_to_next_verified_public_address_before_send(self):
+        attempted = []
+        class FakeConnection:
+            def __init__(self, host, address):
+                self.address = address
+            def connect(self):
+                attempted.append(self.address)
+                if self.address == "2001:db8::1":
+                    raise OSError("synthetic ipv6 unreachable")
+            def request(self, *arguments, **options):
+                pass
+            def getresponse(self):
+                class Response:
+                    status = 200
+                    def read(self, limit):
+                        return json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(FOOD)}}]}).encode()
+                return Response()
+            def close(self):
+                pass
+        with mock.patch("health_journal.cloud.public_addresses", return_value=["2001:db8::1", "93.184.216.34"]), mock.patch("health_journal.cloud.PinnedHTTPS", FakeConnection):
+            content = request_completion({"provider": "openai", "base_url": "https://api.openai.com/v1", "model": "synthetic"}, FAKE_KEY, [])
+        self.assertEqual(attempted, ["2001:db8::1", "93.184.216.34"])
+        self.assertEqual(json.loads(content), FOOD)
         self.configure(provider="custom", base_url="https://example.com/v1", api_key="")
         self.assertFalse(self.cloud.config()["has_key"])
 

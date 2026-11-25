@@ -153,6 +153,9 @@ class ParserTests(unittest.TestCase):
         report, rows = self.parse(export_xml(record_xml(data, tag="Workout")))
         self.assertEqual(rows[0]["metric"], "workout")
         self.assertEqual(rows[0]["value"], 8)
+        with_sleep_type = {**data, "type": "HKCategoryTypeIdentifierSleepAnalysis"}
+        _, workout_rows = self.parse(export_xml(record_xml(with_sleep_type, tag="Workout")))
+        self.assertEqual(workout_rows[0]["metric"], "workout")
         with self.assertRaises(AppError):
             self.parse(export_xml(record_xml({**data, "duration": "120"}, tag="Workout")))
 
@@ -269,6 +272,7 @@ class WearableStoreTests(unittest.TestCase):
         for connection in connections:
             with self.assertRaises(sqlite3.ProgrammingError):
                 connection.execute('SELECT 1')
+        self.assertTrue(self.manager.job["timer"].finished.is_set())
 
     def test_reimport_idempotence_and_batch_deletion_preserves_shared_samples(self):
         self.preview()

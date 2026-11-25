@@ -240,6 +240,18 @@ class CodexTests(unittest.TestCase):
         with self.assertRaises(AppError):
             self.ai.control("connect", {"confirm": True})
 
+    def test_unsubscribe_failure_does_not_discard_completed_draft(self):
+        real_call = self.ai.rpc.call
+        def flaky_unsubscribe(method, params, timeout=15):
+            if method == "thread/unsubscribe":
+                raise AppError("synthetic unsubscribe timeout", 504)
+            return real_call(method, params, timeout=timeout)
+        with mock.patch.object(self.ai.rpc, "call", side_effect=flaky_unsubscribe):
+            draft = self.run_consent(self.prepare())
+        self.assertEqual(draft["provenance"]["provider"], "codex")
+        self.assertEqual(len(self.store.analyses()), 1)
+        self.assertFalse(self.ai.rpc.alive)
+
     def test_shutdown_during_connect_cleans_new_process(self):
         real_start = FakeRPC.start
         manager = self.ai

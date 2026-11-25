@@ -247,10 +247,15 @@ class Store:
             item = {"id": str(uuid.uuid4()), "filename": filename, "mime": mime, "sha256": digest, "size": len(content), "created_at": timestamp()}
             path = self.files / digest
             self.write_attachment(path, content)
-            database.execute("INSERT INTO documents VALUES (?,?,?,?,?,?)", tuple(item.values()))
-            routing = suggest_departments(filename, content.decode("utf-8-sig", errors="replace") if mime == "text/plain" else "")
-            database.execute("INSERT INTO document_routes VALUES (?,?,1)", (item["id"], encode(routing)))
-            self.audit(database, "import", "document", item["id"])
+            try:
+                database.execute("INSERT INTO documents VALUES (?,?,?,?,?,?)", tuple(item.values()))
+                routing = suggest_departments(filename, content.decode("utf-8-sig", errors="replace") if mime == "text/plain" else "")
+                database.execute("INSERT INTO document_routes VALUES (?,?,1)", (item["id"], encode(routing)))
+                self.audit(database, "import", "document", item["id"])
+            except Exception:
+                with contextlib.suppress(OSError):
+                    path.unlink()
+                raise
         return {**item, "duplicate": False}
 
     @staticmethod

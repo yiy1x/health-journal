@@ -142,8 +142,9 @@
     const snapshot = JSON.parse(JSON.stringify(state.dashboard)), metric = snapshot.catalog.find(item => item.id === snapshot.metric);
     app.confirmation('导出未加密的日常回顾？', '包含所示日期的设备日值、来源说明和实际饮食文字。不会导出照片字节；TXT 不是完整备份，请只给可信接收者。', () => {
       const content = ['知己 · 日常手记（静态回顾，非诊断）', `${snapshot.from} 至 ${snapshot.to}；${metric.name} / ${metric.unit}`, `来源：${snapshot.source ? snapshot.sources.find(item => item.source === snapshot.source)?.source_name || snapshot.source : '单来源日值；多来源冲突留空'}`, snapshot.notice, ...snapshot.daily.flatMap(day => [`${day.day}：${number(day.value)} ${metric.unit}；${day.warning}`, ...snapshot.meals.filter(meal => meal.day === day.day).map(meal => `${meals[meal.meal] || meal.meal} ${meal.time || ''}：${meal.note}（${meal.source}）`)])].join('\n');
-      const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
-      app.openModal('回顾已准备好', `<div class="modal-body"><p>未加密，可作为 TXT 导入手机资料版加密保存，不是完整样本同步。</p><a class="button primary" href="${url}" download="日常手记回顾.txt">保存回顾 TXT</a></div>`); setTimeout(() => URL.revokeObjectURL(url), 60000);
+      if (state.photoURL) URL.revokeObjectURL(state.photoURL);
+      state.photoURL = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
+      app.openModal('回顾已准备好', `<div class="modal-body"><p>未加密，可作为 TXT 导入手机资料版加密保存，不是完整样本同步。</p><a class="button primary" href="${state.photoURL}" download="日常手记回顾.txt">保存回顾 TXT</a></div>`);
     });
   }
   function help() { app.openModal('Apple 健康 · 本地导入', '<div class="modal-body"><ol><li>iPhone 健康 → 头像 → 导出所有健康数据。</li><li>通过自己控制的方式把 ZIP 传到运行本应用的电脑。</li><li>选择 ZIP 或 HealthData 主 XML，预览并选择指标/日期后保存。</li></ol><p>不是实时连接，不索取 Apple ID，不读取 iCloud。256 MiB 上传、1 GiB 展开、100 万样本上限。原始 ZIP/XML 不永久保存，请自己保留。</p><p>不支持 GPS、临床病历或 ECG 波形。记录按结束日原时区归属；来源冲突和重叠不臆造总数。</p><p>照片与日记在电脑文件系统，不在浏览器缓存；桌面未加密，请启用磁盘加密并另存备份。手机独立资料版的数据在手机浏览器，不会自动同步这里。</p></div>'); }
@@ -151,6 +152,7 @@
     app = adapter;
     document.addEventListener('click', async event => {
       const target = event.target.closest('[data-wearable]'); if (!target || target.disabled || state.busy) return;
+      let needsRepaint = false;
       try {
         const name = target.dataset.wearable;
         if (name === 'select') safe(() => document.querySelector('#apple-health-upload').click());
@@ -162,7 +164,11 @@
         if (name === 'date-next' && state.day < app.data().today) chooseDay(dayBefore(state.day, -1));
         if (name === 'food-new') foodForm(target.dataset.meal);
         if (name === 'food-edit') { const item = dayMeals(state.day).find(item => item.origin === 'journal' && item.id === target.dataset.id); if (item) foodForm(item.meal, item); }
-        if (name === 'food-delete') safe(() => app.confirmation('删除这条实际饮食？', '只删除所选日记，照片原件保留，不改步数或其它用餐记录。已修改的记录会拒绝旧版本删除。', async () => { await app.request('/api/food', { method: 'DELETE', json: { id: target.dataset.id, version: Number(target.dataset.version), confirm: true } }); await load(); app.toast('日记已删除，关联原件保留'); }, '删除日记'));
+        if (name === 'food-delete') {
+          const form = target.closest('form'), entryId = target.dataset.id, version = Number(target.dataset.version);
+          if (form) delete form.dataset.dirty;
+          app.confirmation('删除这条实际饮食？', '只删除所选日记，照片原件保留，不改步数或其它用餐记录。已修改的记录会拒绝旧版本删除。', async () => { await app.request('/api/food', { method: 'DELETE', json: { id: entryId, version, confirm: true } }); await app.refresh(false); await load(); app.toast('日记已删除，关联原件保留'); }, '删除日记');
+        }
         if (name === 'food-photo') await photoView(target.dataset.id);
         if (name === 'meal-camera') document.querySelector('#daily-meal-camera').click();
         if (name === 'meal-album') document.querySelector('#daily-meal-album').click();
@@ -171,11 +177,11 @@
         if (name === 'details') await details(target.dataset.day, target.dataset.metric, 0, state.choices[target.dataset.metric] || '');
         if (name === 'previous') await details(state.detail.day, state.detail.metric, Math.max(0, state.detail.offset - 50), state.detail.source);
         if (name === 'next') await details(state.detail.day, state.detail.metric, state.detail.offset + 50, state.detail.source);
-        if (name === 'cancel') { state.busy = true; await app.request('/api/wearables/import', { method: 'DELETE', json: { id: state.job.id } }); state.job = null; await poll(); }
+        if (name === 'cancel') { state.busy = true; needsRepaint = true; await app.request('/api/wearables/import', { method: 'DELETE', json: { id: state.job.id } }); state.job = null; await poll(); }
         if (name === 'delete') app.confirmation('移除此健康导入批次？', '仅影响本地设备样本，其他批次引用的样本保留；饮食记录不变。请先备份。', async () => { await app.request('/api/wearables/batches', { method: 'DELETE', json: { id: target.dataset.id, confirm: true } }); await app.refresh(false); await load(); }, '确认移除');
         if (name === 'export') exportReview();
-      } catch (error) { state.error = error.message; app.toast(error.message, true); }
-      finally { state.busy = false; repaint(); }
+      } catch (error) { state.error = error.message; needsRepaint = true; app.toast(error.message, true); }
+      finally { state.busy = false; if (needsRepaint) repaint(); }
     });
     document.addEventListener('change', async event => {
       const input = event.target;
@@ -202,7 +208,9 @@
       let committed = false;
       try {
         if (form.id === 'daily-food-form') {
-          const saved = await app.request('/api/food', { method: form.dataset.version ? 'PUT' : 'POST', json: { id: form.dataset.id, version: Number(form.dataset.version), date: data.get('date'), time: data.get('time'), meal: data.get('meal'), note: data.get('note'), document_id: data.get('document_id') } });
+          const payload = { id: form.dataset.id, date: data.get('date'), time: data.get('time'), meal: data.get('meal'), note: data.get('note'), document_id: data.get('document_id') };
+          if (form.dataset.version) payload.version = Number(form.dataset.version);
+          const saved = await app.request('/api/food', { method: form.dataset.version ? 'PUT' : 'POST', json: payload });
           committed = true; delete form.dataset.dirty; app.closeSavedModal?.(); app.toast('这一餐已保存到本机，未发送给模型'); state.query = null; state.day = saved.date; app.replaceDay?.(saved.date); await app.refresh(false); await load();
         } else if (form.id === 'daily-source-form') { state.choices[form.dataset.metric] = String(data.get('source') || ''); delete form.dataset.dirty; app.closeSavedModal?.(); await load(); }
         else if (form.id === 'wearable-filter-form') { const query = Object.fromEntries(data); if (query.metric !== state.query?.metric) query.source = ''; await load(query); }

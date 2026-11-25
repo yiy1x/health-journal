@@ -234,6 +234,13 @@ class StoreTests(unittest.TestCase):
             with self.subTest(callback=callback), self.assertRaises(AppError):
                 callback()
 
+    def test_add_document_cleans_new_file_on_database_insert_failure(self):
+        with mock.patch("health_journal.store.suggest_departments", side_effect=RuntimeError("synthetic failure")):
+            with self.assertRaises(RuntimeError):
+                self.store.add_document("orphan.txt", b"must-not-remain")
+        self.assertEqual(self.store.documents(), [])
+        self.assertEqual(list(self.store.files.iterdir()), [])
+
     def test_audit_has_no_clinical_text(self):
         self.store.save_record(record(title="合成隐私标记", notes="不应进入日志"))
         encoded = json.dumps(self.store.audits(), ensure_ascii=False)

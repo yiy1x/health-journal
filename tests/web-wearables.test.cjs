@@ -189,3 +189,36 @@ test('late responses after page leave cannot repaint or retain partial snapshot'
   app.requests[0].resolve(snapshot());app.requests[1].resolve({day:'2026-01-04',metrics:{}});await pending;
   assert.equal(app.ui.state.dashboard,null);assert.equal(app.ui.state.loading,false);
 });
+
+test('opening help or modals does not repaint away expanded disclosures', async () => {
+  const app=harness();
+  const before=app.renders();
+  await app.listeners.click({target:{closest:()=>({dataset:{wearable:'help'},disabled:false})}});
+  assert.equal(app.modals.length,1);
+  assert.equal(app.renders(),before);
+});
+
+test('new food submission omits zero version and deleting edited food refreshes document links', async () => {
+  const app=harness();
+  const createForm=form('daily-food-form',[['date','2026-01-02'],['time',''],['meal','breakfast'],['note','合成新餐'],['document_id','']]);
+  createForm.dataset.id='synthetic-new';createForm.dataset.version='';
+  const creating=app.listeners.submit({target:createForm,preventDefault(){}});
+  assert.equal(app.requests[0].options.method,'POST');
+  assert.equal('version' in app.requests[0].options.json,false);
+  app.requests[0].resolve({date:'2026-01-02'}); await tick();
+  app.requests[1].resolve(snapshot()); app.requests[2].resolve({day:'2026-01-02',metrics:{}}); await creating;
+  const dirtyForm={dataset:{dirty:'true'}};
+  let refreshed=0;
+  app.ui.configure({
+    data:()=>app.data, route:()=>'wearables', escape:value=>String(value??''), header:()=>'', badge:()=>'',
+    inputField:()=>'', selectField:()=>'', request:(url,options)=>new Promise(resolve=>app.requests.push({url,options,resolve})),
+    render(){}, refresh:async()=>{refreshed++;}, toast(){}, openModal(){},
+    confirmation(title,body,callback){app.modals.push({title,body,callback});},
+  });
+  await app.listeners.click({target:{closest:selector=>selector==='[data-wearable]'?{dataset:{wearable:'food-delete',id:'synthetic-new',version:'1'},disabled:false,closest:()=>dirtyForm}:null}});
+  assert.equal(dirtyForm.dataset.dirty,undefined);
+  const deleting=app.modals.at(-1).callback();
+  app.requests.at(-1).resolve({ok:true}); await tick();
+  app.requests.at(-2).resolve(snapshot()); app.requests.at(-1).resolve({day:'2026-01-02',metrics:{}}); await deleting;
+  assert.equal(refreshed,1);
+});

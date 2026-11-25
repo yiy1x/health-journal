@@ -95,7 +95,7 @@ def finite(value, maximum):
 
 def normalized(attributes, tag, manual=False):
     metric = TYPE_MAP.get(attributes.get("type")) if tag == "Record" else "workout"
-    if attributes.get("type") == "HKCategoryTypeIdentifierSleepAnalysis":
+    if tag == "Record" and attributes.get("type") == "HKCategoryTypeIdentifierSleepAnalysis":
         metric = "sleep"
     if not metric:
         return None

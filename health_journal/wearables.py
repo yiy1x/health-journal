@@ -267,6 +267,7 @@ class Wearables:
                     self.store.audit(target, "import", "wearable", batch_id)
                     result = {"imported": count_after - count_before, "duplicates": total - (count_after - count_before), "batch_id": batch_id}
             job.update(state="completed", result=result)
+            job["timer"].cancel()
             job["temporary"].cleanup()
             return result
 

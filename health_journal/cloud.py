@@ -73,7 +73,19 @@ class PinnedHTTPS(http.client.HTTPSConnection):
 def request_completion(config, key, messages):
     endpoint = urllib.parse.urlsplit(endpoint_url(config["base_url"]) + "/chat/completions")
     addresses = public_addresses(endpoint.hostname)
-    connection = PinnedHTTPS(endpoint.hostname, addresses[0])
+    connection = None
+    last_error = None
+    for address in addresses[:4]:
+        candidate = PinnedHTTPS(endpoint.hostname, address)
+        try:
+            candidate.connect()
+            connection = candidate
+            break
+        except (OSError, http.client.HTTPException) as error:
+            candidate.close()
+            last_error = error
+    if connection is None:
+        raise AppError("连接模型失败或超时。服务商可能已经收到请求并计费；为避免重复发送，没有自动重试", 503) from last_error
     payload = {"model": config["model"], "messages": messages, "stream": False}
     if config["provider"] == "openai":
         payload.update(store=False, max_completion_tokens=4500)

@@ -292,7 +292,10 @@ class CodexAI(CloudAI):
                     return next(iter(answers.values()))
         finally:
             if rpc.alive:
-                rpc.call("thread/unsubscribe", {"threadId": thread_id}, timeout=3)
+                try:
+                    rpc.call("thread/unsubscribe", {"threadId": thread_id}, timeout=3)
+                except AppError:
+                    rpc.close()
 
     def cancel(self, raw):
         approval = text(raw.get("approval_id"), "待取消请求", 100, True)
