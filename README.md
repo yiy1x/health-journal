@@ -339,9 +339,9 @@ git diff --cached --stat
 
 确认 `.local-*`、SQLite/DB、ZIP、密钥和真实附件均未入暂存区。`.gitignore` 不能保护已经被 Git 跟踪的内容，也无法识别任意命名的真实 PDF/JPG/TXT。
 
-在自己的 GitHub 账号创建空仓库，按仓库页面给出的命令配置 remote 并首次提交/推送。建议先建私有仓库，自查截图、文档、历史提交没有敏感内容，再考虑公开。不要在 Issues、PR、CI 日志或测试夹具中提交病历。
+本项目的规范远端为 [yiy1x/health-journal](https://github.com/yiy1x/health-journal)，原开发目录的 `main` 跟踪 `origin/main`，后续在这一工作区维护。修改前先 fetch 和比较，不从旧 ZIP 覆盖源码，不强推远端；原历史与合并决策见 [仓库统一说明](docs/RECONCILIATION.md)。如另行 fork，由 fork 所有者确认地址及可见性，不擅自改本项目 origin。不要在 Issues、PR、CI 日志或测试夹具中提交病历。
 
-发布门禁、许可检查、私有漏洞渠道和回滚步骤见 [发布检查清单](docs/RELEASING.md)。当前仓库没有填写虚构的远端地址、CI 徽章或维护者邮箱；应由仓库所有者确认账号、可见性、版权归属和联系方式后再发布。只发布代码不会自动备份本机档案。
+发布门禁、许可检查、私有漏洞渠道和回滚步骤见 [发布检查清单](docs/RELEASING.md)。CI 结果以实际提交的 Actions 为准，不使用虚假通过徽章；维护者联系方式与私有报告配置须由仓库所有者确认。只发布代码不会自动备份或迁移本机档案。
 
 ## 后续扩展方向
 
