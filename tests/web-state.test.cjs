@@ -322,3 +322,17 @@ test('uploaded timestamps use local calendar, not sliced UTC date', () => {
   assert.equal(app.run(`localDate('2026-11-12T20:30:00+00:00')`), new Date('2026-11-12T20:30:00+00:00').toLocaleDateString('zh-CN'));
   assert.ok(!source.includes('doc.created_at.slice(0, 10)'));
 });
+
+test('deleted entities and invalid series index fail cleanly without throwing', async () => {
+  const app = harness();
+  app.run(`state.series=-5;state.data.records=[{id:'obs',kind:'observation',title:'血红蛋白',date:'2026-11-01',department:'',topic:'',notes:'',source_label:'',document_id:null,verification:'verified',version:1,updated_at:'2026-11-01T00:00:00Z',data:{value:130,comparator:'=',unit:'g/L',lab:'',reference_low:null,reference_high:null}}]`);
+  assert.ok(app.run('trendsView()').includes('血红蛋白'));
+  assert.equal(app.run('state.series'), 0);
+  const toast = app.run('document.querySelector("#toast")');
+  for (const [action, extra] of [['edit-record', {}], ['delete-analysis', {}], ['download-document', {}], ['swap-meal', { meal: 'breakfast' }]]) {
+    const target = { disabled: false, isConnected: false, dataset: { action, id: 'missing-id', ...extra }, closest: selector => selector === '[data-action]' ? target : null };
+    await app.listeners.click[0]({ target });
+    assert.equal(toast.className, 'visible error');
+    assert.equal(app.requests.length, 0);
+  }
+});

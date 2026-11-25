@@ -1,12 +1,12 @@
 :root {
   color-scheme: light;
-  --ink: #253c58;
-  --text: #33465c;
-  --muted: #778697;
-  --green: #397269;
+  --ink: #203c3b;
+  --text: #344b44;
+  --muted: #60726b;
+  --green: #286b5a;
   --sage: #e8f2ed;
-  --line: #e6ebef;
-  --canvas: #f4f7f9;
+  --line: #dce6e2;
+  --canvas: #f4f7f5;
   --amber: #986021;
   --red: #a94343;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
@@ -71,7 +71,7 @@ main { max-width: 1500px; padding: 36px 42px 16px; margin: 0 auto; outline: none
 .button .icon { width: 16px; height: 16px; }
 .button.primary { background: var(--green); color: white; }
 .button.primary:hover { background: #2e625a; }
-.button.secondary { background: #fff; border-color: #dbe3e7; color: #475e73; }
+.button.secondary { background: #fff; border-color: var(--line); color: var(--text); }
 .button.secondary:hover { background: #f4f8f7; border-color: #a2bbb5; }
 .button.quiet { color: #5f7d80; background: transparent; }
 .button.quiet:hover { background: #eef3f3; }
@@ -87,7 +87,7 @@ main { max-width: 1500px; padding: 36px 42px 16px; margin: 0 auto; outline: none
 .badge.amber { color: #956328; background: #faf0df; }
 .badge.blue { color: #55799b; background: #edf3f9; }
 .muted { color: var(--muted); font-size: 12px; }
-.overview-banner { min-height: 276px; border: 1px solid #dae7e7; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; overflow: hidden; background: #eaf2f3; padding: 28px 38px; position: relative; }
+.overview-banner { min-height: 240px; border: 1px solid var(--line); border-radius: 12px; display: flex; justify-content: space-between; align-items: center; overflow: hidden; background: #eaf2ed; padding: 24px 32px; position: relative; }
 .banner-copy { position: relative; z-index: 2; }
 .banner-tag { font-size: 11px; color: #658381; display: inline-block; margin-bottom: 12px; }
 .banner-copy h2 { font-size: 27px; line-height: 1.48; letter-spacing: .5px; font-weight: 560; margin-bottom: 13px; }
@@ -113,7 +113,7 @@ main { max-width: 1500px; padding: 36px 42px 16px; margin: 0 auto; outline: none
 .stat-strip small { display: block; font-size: 11px; font-weight: 400; color: #81909e; margin-top: 4px; }
 .stat-strip .icon { color: #8da4b0; width: 23px; height: 23px; }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(250px, 1fr); gap: 22px; align-items: stretch; margin-bottom: 22px; }
-.panel { background: white; border: 1px solid var(--line); border-radius: 10px; padding: 25px; margin-bottom: 22px; min-width: 0; }
+.panel { background: white; border: 1px solid var(--line); border-radius: 12px; padding: 25px; margin-bottom: 22px; min-width: 0; }
 .dashboard-grid .panel { margin-bottom: 0; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 18px; }
 .panel-heading h2 { margin-bottom: 0; }
@@ -278,7 +278,7 @@ code { font-size: 10px; }
 .shopping-checks { display: grid; gap: 14px; padding: 15px 0 28px; }
 .page-note { font-size: 11px; color: #8c9aa4; line-height: 1.9; }
 .assistant-layout { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(235px, 1fr); gap: 24px; align-items: start; }
-.assistant-main { padding: 30px; min-height: 570px; }
+.assistant-main { padding: 30px; min-height: 440px; }
 .assistant-intro { display: flex; gap: 14px; align-items: center; margin-bottom: 24px; }
 .assistant-symbol { width: 43px; height: 45px; display: grid; place-items: center; color: #5c9080; background: #eaf4ee; border-radius: 12px; flex-shrink: 0; }
 .assistant-intro h2 { margin-bottom: 5px; }
@@ -289,7 +289,7 @@ code { font-size: 10px; }
 #assistant-form textarea { background: #fafcfb; padding: 15px; font-size: 12px; }
 .assistant-controls { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin: 13px 0 24px; }
 .check-label { display: flex; align-items: flex-start; gap: 9px; font-size: 11px; color: #7c8e9b; cursor: pointer; line-height: 1.8; }
-.assistant-placeholder { border-top: 1px solid #edf1f3; padding: 60px 10px; text-align: center; }
+.assistant-placeholder { border-top: 1px solid var(--line); padding: 36px 10px; text-align: center; }
 .assistant-placeholder span { color: #7e948c; font-size: 16px; }
 .assistant-placeholder p { color: #9caaa6; font-size: 11px; margin-top: 12px; }
 .assistant-aside .panel h2 { font-size: 15px; }

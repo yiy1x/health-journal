@@ -72,13 +72,23 @@ class CodexRPC:
         self.events = queue.Queue(maxsize=32)
         self.outbound = queue.Queue(maxsize=8)
         self.sequence = 0
-        self.auth_epoch = 0
+        self._auth_epoch = 0
         self.failed = False
         self.workers = []
 
     @property
     def alive(self):
         return self.process is not None and self.process.poll() is None and not self.failed
+
+    @property
+    def auth_epoch(self):
+        with self.lock:
+            return self._auth_epoch
+
+    @auth_epoch.setter
+    def auth_epoch(self, value):
+        with self.lock:
+            self._auth_epoch = value
 
     def start(self):
         if self.process is not None:
@@ -177,7 +187,7 @@ class CodexRPC:
                         break
                     if message["method"] == "account/updated":
                         with self.lock:
-                            self.auth_epoch += 1
+                            self._auth_epoch += 1
                     method = message["method"]
                     item = message.get("params", {}).get("item")
                     user_echo = method in ("item/started", "item/completed") and isinstance(item, dict) and item.get("type") == "userMessage"

@@ -217,10 +217,11 @@ class Wearables:
     def upload_failed(self, job):
         with self.lock:
             job["cancelled"].set()
-            job["timer"].cancel()
-            job["temporary"].cleanup()
-            if self.job is job:
-                self.job = None
+            if job.get("worker") is None:
+                job["timer"].cancel()
+                job["temporary"].cleanup()
+                if self.job is job:
+                    self.job = None
 
     def commit(self, raw):
         with self.lock:
@@ -286,6 +287,8 @@ class Wearables:
     def overview(self, first, last, metric="steps", source=""):
         first, last = date_value(first, "起始日期", True), date_value(last, "结束日期", True)
         start_day, end_day = datetime.date.fromisoformat(first), datetime.date.fromisoformat(last)
+        if not isinstance(metric, str):
+            raise AppError("指标、来源或日期范围无效，最多查看 366 天")
         if metric not in METRICS or not 0 <= (end_day - start_day).days <= 365 or source and (not isinstance(source, str) or not re_hash(source)):
             raise AppError("指标、来源或日期范围无效，最多查看 366 天")
         with self.store.lock, self.store.connection() as database:

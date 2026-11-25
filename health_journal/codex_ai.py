@@ -63,10 +63,10 @@ class CodexAI(CloudAI):
         with self.lock:
             selected = self.store.setting("codex_config") or {"model": "", "vision": False}
             connected = bool(self.rpc and self.rpc.alive)
-            authenticated = bool(connected and self.account and self.rpc.auth_epoch == self.epoch)
+            authenticated = bool(not self.closed and connected and self.account and self.rpc.auth_epoch == self.epoch)
             return {"provider": "codex", "base_url": DESTINATION, "model": selected["model"], "vision": selected["vision"], "revision": self.revision,
-                    "connected": connected, "authenticated": authenticated, "account": self.account if authenticated else None,
-                    "models": list(self.models) if authenticated else [], "login": self.login if connected else None,
+                    "connected": connected, "authenticated": authenticated, "account": dict(self.account) if authenticated else None,
+                    "models": [dict(item) for item in self.models] if authenticated else [], "login": dict(self.login) if connected and self.login else None,
                     "busy": self.busy, "operation": self.operation, "has_key": authenticated and any(item["model"] == selected["model"] for item in self.models),
                     "credential_storage": "本档案目录 .codex-connection/auth，由 Codex 管理；不是应用数据库加密的一部分"}
 
@@ -108,13 +108,16 @@ class CodexAI(CloudAI):
                     raise AppError("服务已停止或正在分析；请先取消分析", 409)
                 self.invalidate()
             if action == "connect":
-                if self.rpc:
-                    self.rpc.close()
-                self.rpc = self.rpc_factory(self.store.directory / ".codex-connection", self.executable)
-                self.account = None
-                self.models = []
-                self.login = None
-                self.rpc.start()
+                with self.lock:
+                    previous_rpc = self.rpc
+                    self.rpc = self.rpc_factory(self.store.directory / ".codex-connection", self.executable)
+                    self.account = None
+                    self.models = []
+                    self.login = None
+                    current_rpc = self.rpc
+                if previous_rpc:
+                    previous_rpc.close()
+                current_rpc.start()
                 self._refresh()
             elif action in ("login", "refresh", "cancel-login", "logout"):
                 if not self.rpc or not self.rpc.alive:
@@ -123,39 +126,49 @@ class CodexAI(CloudAI):
                     if self.account or self.login:
                         raise AppError("请先退出当前账号或取消已有登录", 409)
                     result = self.rpc.call("account/login/start", {"type": "chatgpt"})
-                    self.login = {"id": text(result.get("loginId"), "登录标识", 100, True), "url": official_auth_url(result.get("authUrl"))}
+                    with self.lock:
+                        self.login = {"id": text(result.get("loginId"), "登录标识", 100, True), "url": official_auth_url(result.get("authUrl"))}
                 elif action == "cancel-login":
                     if self.login:
                         self.rpc.call("account/login/cancel", {"loginId": self.login["id"]})
-                    self.login = None
+                    with self.lock:
+                        self.login = None
                     self._refresh()
                 elif action == "logout":
                     self.rpc.call("account/logout", {})
-                    self.account = None
-                    self.models = []
-                    self.login = None
-                    self.epoch = self.rpc.auth_epoch
+                    with self.lock:
+                        self.account = None
+                        self.models = []
+                        self.login = None
+                        self.epoch = self.rpc.auth_epoch
                 else:
                     self._refresh()
             elif action == "disconnect":
-                if self.rpc:
-                    self.rpc.close()
-                self.account = None
-                self.models = []
-                self.login = None
+                with self.lock:
+                    current_rpc = self.rpc
+                    self.account = None
+                    self.models = []
+                    self.login = None
+                if current_rpc:
+                    current_rpc.close()
             else:
                 raise AppError("未知 Codex 操作", 404)
             return self.config()
         except AppError as error:
             if error.status >= 500 and self.rpc:
                 self.rpc.close()
-                self.account = None
-                self.models = []
-                self.login = None
+                with self.lock:
+                    self.account = None
+                    self.models = []
+                    self.login = None
             raise
         except Exception:
             if self.rpc:
                 self.rpc.close()
+            with self.lock:
+                self.account = None
+                self.models = []
+                self.login = None
             raise AppError("Codex 连接操作失败，请重新连接；未发送健康资料", 502) from None
         finally:
             if self.closed and self.rpc:
@@ -182,17 +195,19 @@ class CodexAI(CloudAI):
                 if not isinstance(modalities, list) or any(value not in ("text", "image") for value in modalities) or any(row["model"] == name for row in models):
                     raise AppError("Codex 模型能力格式不兼容", 502)
                 models.append({"model": name, "name": text(item.get("displayName") or name, "模型名称", 160), "vision": "image" in modalities})
-            self.login = None
+            with self.lock:
+                self.login = None
         while True:
             try:
                 event = self.rpc.events.get_nowait()
             except queue.Empty:
                 break
             if event.get("method") == "account/login/completed" and event.get("params", {}).get("success") is False:
-                self.login = None
+                with self.lock:
+                    self.login = None
                 raise AppError("官方登录未完成或已取消，请重新发起登录", 422)
         with self.lock:
-            if epoch != self.rpc.auth_epoch:
+            if self.closed or epoch != self.rpc.auth_epoch:
                 self.account = None
                 self.models = []
                 raise AppError("登录状态刚刚变化，请再刷新一次账号状态", 409)
@@ -305,7 +320,8 @@ class CodexAI(CloudAI):
             self.cancelled.set()
             self.invalidate()
             rpc = self.rpc
-        rpc.close()
+        if rpc:
+            rpc.close()
         return {"ok": True, "notice": "已停止本地等待；服务商可能已经处理请求，无法撤回内容或额度"}
 
     def close(self):

@@ -14,8 +14,9 @@
     lock: '<rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
     file: '<path d="M5 3h9l5 5v13H5ZM14 3v6h5M8 13h8m-8 4h6"/>', arrow: '<path d="M4 12h16m-6-6 6 6-6 6"/>',
   };
-  const state = { dashboard: null, dayData: null, query: null, day: '', choices: {}, loading: false, error: '', job: null, busy: false, sequence: 0, timer: null, entered: false, detail: null, photoURL: null };
+  const state = { dashboard: null, dayData: null, query: null, day: '', choices: {}, loading: false, error: '', job: null, busy: false, sequence: 0, pollSequence: 0, detailSequence: 0, timer: null, entered: false, detail: null, photoURL: null };
   let app;
+  let configured = false;
   function icon(name) { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.file}</svg>`; }
   function escape(value) { return app.escape(value); }
   function dayBefore(day, count) { const date = new Date(day + 'T12:00:00Z'); date.setUTCDate(date.getUTCDate() - count); return date.toISOString().slice(0, 10); }
@@ -56,7 +57,10 @@
   function reviewView() {
     const metadata = state.dashboard?.catalog || app.data().wearables?.catalog || [], query = state.query || { metric: 'steps', from: dayBefore(state.day || app.data().today, 6), to: state.day || app.data().today, source: '' };
     const metric = currentMetric(), days = state.dashboard?.daily || [], available = days.filter(day => day.value !== null);
-    return `<section class="panel daily-trends"><div class="panel-heading"><div><span class="daily-section-kicker">慢慢看变化</span><h2>走过的路，吃过的饭</h2><p>当前 ${escape(metric.name)} · ${available.length}/${days.length || 7} 天有可用数值。只记录，不评分。</p></div>${action('导出回顾', 'export', state.dashboard ? '' : 'disabled', 'secondary small')}</div><form id="wearable-filter-form" class="daily-trend-filters">${app.selectField('指标', 'metric', query.metric, metadata.map(item => [item.id, item.name]))}${app.inputField('开始', 'from', query.from, 'date', 'required')}${app.inputField('结束', 'to', query.to, 'date', 'required')}<button class="button secondary" type="submit">更新</button>${app.selectField('趋势来源', 'source', query.source, [['', '单来源日值；多来源留空'], ...(state.dashboard?.sources || []).map(source => [source.source, source.source_name + (source.device ? ' · ' + source.device.slice(0, 60) : '')])])}<p class="form-message" role="alert"></p></form>${chart(days, metric.unit)}<details class="daily-disclosure"><summary>查看逐日数值与实际饮食</summary><div class="table-scroll"><table><thead><tr><th>日期</th><th>${escape(metric.name)}</th><th>记录口径</th><th>实际饮食</th></tr></thead><tbody>${days.slice().reverse().map(day => `<tr><td>${action(escape(day.day), 'day', `data-day="${day.day}"`, 'quiet small')}</td><td>${number(day.value)} ${escape(metric.unit)}</td><td>${escape(day.warning || `${day.count} 条样本`)}</td><td>${dayMeals(day.day).map(item => `<p>${escape(meals[item.meal] || item.meal)} · ${escape(item.note)}</p>`).join('') || '未记录'}</td></tr>`).join('')}</tbody></table></div></details><p class="daily-footnote">${escape(state.dashboard?.notice || '消费级记录不是诊断。不同来源不直接相加；缺失不按零计算。')}${metric.id === 'sleep' ? '睡眠按样本结束日取并集，不等于按夜统计。' : ''}</p></section>`;
+    return `<section class="panel daily-trends"><div class="panel-heading"><div><h2>活动与饮食回顾</h2><p>${escape(metric.name)}：${available.length}/${days.length || 7} 天有可用数值。未记录的日期留空。</p></div>${action('导出回顾', 'export', state.dashboard ? '' : 'disabled', 'secondary small')}</div>
+      <form id="wearable-filter-form" class="daily-trend-filters">${app.selectField('指标', 'metric', query.metric, metadata.map(item => [item.id, item.name]))}${app.inputField('开始', 'from', query.from, 'date', 'required')}${app.inputField('结束', 'to', query.to, 'date', 'required')}<button class="button secondary" type="submit">更新</button>${app.selectField('趋势来源', 'source', query.source, [['', '单来源日值；多来源留空'], ...(state.dashboard?.sources || []).map(source => [source.source, source.source_name + (source.device ? ' · ' + source.device.slice(0, 60) : '')])])}<p class="form-message" role="alert"></p></form>
+      ${chart(days, metric.unit)}<details class="daily-disclosure"><summary>查看逐日数值与实际饮食</summary><div class="table-scroll"><table><thead><tr><th>日期</th><th>${escape(metric.name)}</th><th>统计说明</th><th>实际饮食</th></tr></thead><tbody>${days.slice().reverse().map(day => `<tr><td>${action(escape(day.day), 'day', `data-day="${day.day}"`, 'quiet small')}</td><td>${number(day.value)} ${escape(metric.unit)}</td><td>${escape(day.warning || `${day.count} 条样本`)}</td><td>${dayMeals(day.day).map(item => `<p>${escape(meals[item.meal] || item.meal)} · ${escape(item.note)}</p>`).join('') || '未记录'}</td></tr>`).join('')}</tbody></table></div></details>
+      <p class="daily-footnote">${escape(state.dashboard?.notice || '消费级设备数据不是诊断依据。不同来源不直接相加；缺失不按零计算。')}${metric.id === 'sleep' ? '睡眠按样本结束日取并集，不等于按夜统计。' : ''}</p></section>`;
   }
   function managementView() {
     const batches = state.dashboard?.batches || [];
@@ -64,7 +68,12 @@
   }
   function view() {
     const day = state.day || requestedDay(), entries = dayMeals(day), latest = app.data().wearables?.latest || '';
-    return `<div class="daily-workspace"><header class="daily-page-heading"><div><span class="daily-section-kicker">活动与饮食，在同一天相遇</span><h1>日常手记</h1><p>走了多少，吃了什么，都从真实记录开始。</p></div><div class="daily-inline-actions">${action(icon('plus') + '记一餐', 'food-new', '', 'primary')}${action(icon('file') + '导入健康', 'select')}</div></header>${calendar(day)}<div class="daily-state-line"><span>${icon('lock')} 本机保存 · 不发送给 AI</span><span>${latest ? `健康记录到 ${escape(latest)}` : 'Apple 健康尚未导入'}${latest && latest !== day ? action('查看最近记录日', 'day', `data-day="${latest}"`, 'quiet small') : ''}</span></div>${state.error ? `<div class="alert warning" role="alert">${escape(state.error)} ${action('重新读取', 'reload', '', 'secondary small')}</div>` : ''}${statusView()}<div class="daily-layout"><section class="daily-meals-column"><div class="daily-section-title"><div><h2>好好吃饭</h2><p>${escape(day)} · ${entries.length} 条人工记录</p></div><a class="text-link" href="#meals">需要餐单灵感？ ${icon('arrow')}</a></div><div class="daily-meal-grid">${Object.keys(meals).map(kind => mealCard(kind, entries.filter(item => item.meal === kind), day)).join('')}</div><div class="daily-kind-note"><span>${icon('bowl')}</span><p>记一餐不需要先生成餐单，也不需要 AI。<br><small>照片是依据，文字由你填写；不估算热量，不用步数决定吃多少。</small></p></div></section>${metricsView(day)}</div>${reviewView()}${managementView()}<footer class="daily-footer-note">实际饮食是人工记录的个人自述，设备记录不是诊断。同日变化不等于因果；有不适请及时就医。</footer></div>`;
+    return `<div class="daily-workspace"><header class="daily-page-heading"><div><h1>日常手记</h1><p>记下吃了什么，查看同一天的步数、睡眠和心率。</p></div><div class="daily-inline-actions">${action(icon('plus') + '记一餐', 'food-new', '', 'primary')}${action(icon('file') + '导入健康', 'select')}</div></header>
+      ${calendar(day)}<div class="daily-state-line"><span>${icon('lock')} 本机保存 · 不发送给 AI</span><span>${latest ? `健康记录到 ${escape(latest)}` : 'Apple 健康尚未导入'}${latest && latest !== day ? action('查看最近记录日', 'day', `data-day="${latest}"`, 'quiet small') : ''}</span></div>
+      ${state.error ? `<div class="alert warning" role="alert">${escape(state.error)} ${action('重新读取', 'reload', '', 'secondary small')}</div>` : ''}${statusView()}
+      <div class="daily-layout"><section class="daily-meals-column"><div class="daily-section-title"><div><h2>${day === app.data().today ? '今日饮食' : '当天饮食'}</h2><p>${escape(day)} · ${entries.length} 条人工记录</p></div><a class="text-link" href="#meals">查看餐单参考 ${icon('arrow')}</a></div>
+      <div class="daily-meal-grid">${Object.keys(meals).map(kind => mealCard(kind, entries.filter(item => item.meal === kind), day)).join('')}</div><div class="daily-kind-note"><span>${icon('bowl')}</span><p>直接记一餐即可，照片可选，不需要先配置模型。<br><small>不估算热量，也不会根据步数建议少吃或多吃。</small></p></div></section>${metricsView(day)}</div>
+      ${reviewView()}${managementView()}<footer class="daily-footer-note">饮食由本人记录，设备数据仅供参考。有不适请及时就医。</footer></div>`;
   }
 
   async function load(query) {
@@ -72,7 +81,21 @@
     state.day = day; state.query = { ...next }; state.dashboard = null; state.dayData = null; state.loading = true; state.error = '';
     const dayQuery = { date: day, ...Object.fromEntries(Object.entries(state.choices).map(([key, value]) => [key + '_source', value])) };
     try {
-      const [dashboard, dayData] = await Promise.all([app.request('/api/wearables?' + new URLSearchParams(next)), app.request('/api/day?' + new URLSearchParams(dayQuery))]);
+      let [dashboard, dayData] = await Promise.all([app.request('/api/wearables?' + new URLSearchParams(next)), app.request('/api/day?' + new URLSearchParams(dayQuery))]);
+      if (sequence !== state.sequence) return;
+      let staleChoice = false;
+      for (const [metric, selected] of Object.entries(state.choices)) {
+        if (selected && !dayData.metrics?.[metric]?.sources.some(source => source.source === selected)) {
+          state.choices[metric] = '';
+          dayQuery[metric + '_source'] = '';
+          staleChoice = true;
+        }
+      }
+      if (next.source && !dashboard.sources.some(source => source.source === next.source)) {
+        state.query.source = '';
+        staleChoice = true;
+      }
+      if (staleChoice) [dashboard, dayData] = await Promise.all([app.request('/api/wearables?' + new URLSearchParams(state.query)), app.request('/api/day?' + new URLSearchParams(dayQuery))]);
       if (sequence === state.sequence) { state.dashboard = dashboard; state.dayData = dayData; }
       if (sequence === state.sequence && !(next.from <= day && day <= next.to)) {
         const single = await app.request('/api/wearables?' + new URLSearchParams({ from: day, to: day, metric: 'steps', source: '' }));
@@ -84,8 +107,9 @@
   async function poll() {
     clearTimeout(state.timer); state.timer = null;
     if (app.route() !== 'wearables') return;
-    try { state.job = await app.request('/api/wearables/import'); repaint(); }
-    catch (error) { state.error = error.message; repaint(); return; }
+    const sequence = ++state.pollSequence;
+    try { const job = await app.request('/api/wearables/import'); if (sequence !== state.pollSequence || app.route() !== 'wearables') return; state.job = job; repaint(); }
+    catch (error) { if (sequence === state.pollSequence) { state.error = error.message; repaint(); } return; }
     if (['uploading', 'parsing'].includes(state.job.state) && app.route() === 'wearables') state.timer = setTimeout(poll, 1200);
   }
   function enter() {
@@ -97,8 +121,8 @@
   }
   function chooseDay(day) { if (validDay(day)) safe(() => { state.query = null; if (app.navigate) app.navigate('wearables?date=' + day); else { state.day = day; load(); } }); }
   async function details(day, metric = state.query?.metric || 'steps', offset = 0, source = '') {
-    const captured = state.sequence, result = await app.request('/api/wearables/details?' + new URLSearchParams({ day, metric, source, offset: String(offset) }));
-    if (app.route() !== 'wearables' || captured !== state.sequence) return;
+    const captured = state.sequence, detailSequence = ++state.detailSequence, result = await app.request('/api/wearables/details?' + new URLSearchParams({ day, metric, source, offset: String(offset) }));
+    if (app.route() !== 'wearables' || captured !== state.sequence || detailSequence !== state.detailSequence) return;
     state.detail = { day, metric, offset, source };
     app.openModal('原始样本 · 非临床核验', `<div class="modal-body"><p>${escape(day)} · 共 ${result.total} 条，本页 ${result.items.length} 条。</p>${result.items.map(item => `<section class="wearable-detail"><strong>${number(item.value)} ${escape(item.unit)} ${escape(item.category)}</strong><p>导出原值：${escape(item.original_value)} ${escape(item.original_unit)}</p><p>${escape(item.source_name)}${item.manual ? ' · 手工录入' : ''}</p><small>${escape(item.start)}<br>${escape(item.end)}<br>${escape(item.device)} · ${escape(item.source_version)}</small></section>`).join('')}<div class="form-footer">${action('上一页', 'previous', offset ? '' : 'disabled')}${action('下一页', 'next', offset + 50 >= result.total ? 'disabled' : '')}</div></div>`, 'record-modal');
   }
@@ -150,9 +174,11 @@
   function help() { app.openModal('Apple 健康 · 本地导入', '<div class="modal-body"><ol><li>iPhone 健康 → 头像 → 导出所有健康数据。</li><li>通过自己控制的方式把 ZIP 传到运行本应用的电脑。</li><li>选择 ZIP 或 HealthData 主 XML，预览并选择指标/日期后保存。</li></ol><p>不是实时连接，不索取 Apple ID，不读取 iCloud。256 MiB 上传、1 GiB 展开、100 万样本上限。原始 ZIP/XML 不永久保存，请自己保留。</p><p>不支持 GPS、临床病历或 ECG 波形。记录按结束日原时区归属；来源冲突和重叠不臆造总数。</p><p>照片与日记在电脑文件系统，不在浏览器缓存；桌面未加密，请启用磁盘加密并另存备份。手机独立资料版的数据在手机浏览器，不会自动同步这里。</p></div>'); }
   function configure(adapter) {
     app = adapter;
+    if (configured) return;
+    configured = true;
     document.addEventListener('click', async event => {
       const target = event.target.closest('[data-wearable]'); if (!target || target.disabled || state.busy) return;
-      let needsRepaint = false;
+      let needsRepaint = false, ownsBusy = false;
       try {
         const name = target.dataset.wearable;
         if (name === 'select') safe(() => document.querySelector('#apple-health-upload').click());
@@ -175,13 +201,13 @@
         if (name === 'legacy-plan') app.openPlan?.(target.dataset.day);
         if (name === 'metric-details') metricDetails(target.dataset.metric);
         if (name === 'details') await details(target.dataset.day, target.dataset.metric, 0, state.choices[target.dataset.metric] || '');
-        if (name === 'previous') await details(state.detail.day, state.detail.metric, Math.max(0, state.detail.offset - 50), state.detail.source);
-        if (name === 'next') await details(state.detail.day, state.detail.metric, state.detail.offset + 50, state.detail.source);
-        if (name === 'cancel') { state.busy = true; needsRepaint = true; await app.request('/api/wearables/import', { method: 'DELETE', json: { id: state.job.id } }); state.job = null; await poll(); }
+        if (name === 'previous' && state.detail) await details(state.detail.day, state.detail.metric, Math.max(0, state.detail.offset - 50), state.detail.source);
+        if (name === 'next' && state.detail) await details(state.detail.day, state.detail.metric, state.detail.offset + 50, state.detail.source);
+        if (name === 'cancel' && state.job?.id) { state.busy = true; ownsBusy = true; needsRepaint = true; state.pollSequence++; await app.request('/api/wearables/import', { method: 'DELETE', json: { id: state.job.id } }); state.job = null; await poll(); }
         if (name === 'delete') app.confirmation('移除此健康导入批次？', '仅影响本地设备样本，其他批次引用的样本保留；饮食记录不变。请先备份。', async () => { await app.request('/api/wearables/batches', { method: 'DELETE', json: { id: target.dataset.id, confirm: true } }); await app.refresh(false); await load(); }, '确认移除');
         if (name === 'export') exportReview();
       } catch (error) { state.error = error.message; needsRepaint = true; app.toast(error.message, true); }
-      finally { state.busy = false; if (needsRepaint) repaint(); }
+      finally { if (ownsBusy) state.busy = false; if (needsRepaint) repaint(); }
     });
     document.addEventListener('change', async event => {
       const input = event.target;
@@ -214,12 +240,12 @@
           committed = true; delete form.dataset.dirty; app.closeSavedModal?.(); app.toast('这一餐已保存到本机，未发送给模型'); state.query = null; state.day = saved.date; app.replaceDay?.(saved.date); await app.refresh(false); await load();
         } else if (form.id === 'daily-source-form') { state.choices[form.dataset.metric] = String(data.get('source') || ''); delete form.dataset.dirty; app.closeSavedModal?.(); await load(); }
         else if (form.id === 'wearable-filter-form') { const query = Object.fromEntries(data); if (query.metric !== state.query?.metric) query.source = ''; await load(query); }
-        else { await app.request('/api/wearables/commit', { method: 'POST', json: { id: state.job.id, metrics: data.getAll('metrics'), from: data.get('from'), to: data.get('to'), confirm: data.has('confirm') } }); await app.refresh(false); await poll(); await load(); app.toast('健康样本已保存；今天没有数据时可查看最近记录日'); }
+        else { if (!state.job?.id) throw new Error('导入预览已失效，请重新选择文件'); await app.request('/api/wearables/commit', { method: 'POST', json: { id: state.job.id, metrics: data.getAll('metrics'), from: data.get('from'), to: data.get('to'), confirm: data.has('confirm') } }); await app.refresh(false); await poll(); await load(); app.toast('健康样本已保存；今天没有数据时可查看最近记录日'); }
         delete form.dataset.dirty;
       } catch (error) { if (committed) { state.error = '这一餐已保存，但页面刷新失败，请刷新查看，不必重复新增。'; app.toast(state.error, true); } else { const message = form.querySelector('.form-message'); if (message) message.textContent = error.message; else app.toast(error.message, true); } }
       finally { delete form.dataset.saving; controls.forEach(control => { control.disabled = false; }); state.busy = false; repaint(); }
     });
-    window.addEventListener('hashchange', () => { if (app.route() !== 'wearables') { clearTimeout(state.timer); state.timer = null; state.entered = false; state.sequence++; state.loading = false; } });
+    window.addEventListener('hashchange', () => { if (app.route() !== 'wearables') { clearTimeout(state.timer); state.timer = null; state.entered = false; state.sequence++; state.pollSequence++; state.detailSequence++; state.loading = false; } });
     window.addEventListener('beforeunload', event => { if (state.busy) { event.preventDefault(); event.returnValue = ''; } });
     document.querySelector('#modal')?.addEventListener?.('close', () => { if (state.photoURL) URL.revokeObjectURL(state.photoURL); state.photoURL = null; });
   }

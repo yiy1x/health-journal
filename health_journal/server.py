@@ -135,8 +135,8 @@ class Handler(BaseHTTPRequestHandler):
         if not 0 < size <= MAX_UPLOAD:
             raise AppError("单个 ZIP/XML 最多 256 MiB；可以解压后选择主 XML，仍须遵守限额", 413)
         job = self.server.wearables.reserve(urllib.parse.unquote(self.headers.get("X-Filename", "")))
-        path = Path(job["temporary"].name) / "input"
         try:
+            path = Path(job["temporary"].name) / "input"
             digest = hashlib.sha256()
             remaining = size
             deadline = time.monotonic() + 180
@@ -210,10 +210,10 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/api/state":
             with store.lock:
                 snapshot = {"version": __version__, "today": datetime.date.today().isoformat(), "profile": store.profile(), "profile_version": store.profile_version(), "records": store.records(), "documents": store.documents(), "plans": store.plans(), "recipes": RECIPES, "allergens": ALLERGENS, "nutrition_restrictions": restrictions(store.profile(), store.records()), "audits": store.audits(), "model": store.setting("model"), "demo": bool(store.setting("demo")), "data_directory": str(store.directory), "nutrition_notice": NOTICE, "safety": EMERGENCY, "departments": CATALOG, "analyses": store.analyses()}
+                with store.connection() as database:
+                    snapshot["wearables"] = wearable_summary(database)
             snapshot["cloud"] = self.server.cloud.config()
             snapshot["codex"] = self.server.codex.config()
-            with store.lock, store.connection() as database:
-                snapshot["wearables"] = wearable_summary(database)
             self.json_response(snapshot)
         elif path == "/api/wearables/import" and method == "POST":
             self.json_response(self.apple_upload(), 202)

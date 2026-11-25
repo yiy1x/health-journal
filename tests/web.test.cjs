@@ -170,6 +170,18 @@ test('privacy labels disclose optional cloud and memory-only key', () => {
   assert.ok(!source.includes('localStorage'));
 });
 
+test('two-section navigation groups daily and archive views with compact model settings', () => {
+  assert.equal(run('navSections.map(section => section[0]).join(",")'), '日常记录,医疗档案');
+  assert.equal(run(`routeGroup('wearables')`), '日常记录');
+  assert.equal(run(`routeGroup('timeline')`), '医疗档案');
+  assert.equal(run(`routeGroup('models')`), '设置');
+  run(`state.data.cloud={provider:'deepseek',base_url:'https://api.deepseek.com',model:'deepseek-flash',vision:true,has_key:false,providers:[{id:'deepseek',name:'DeepSeek（深度求索）',base_url:'https://api.deepseek.com'}]}`);
+  const html = run('modelsView()');
+  assert.ok(html.includes('deepseek-flash'));
+  assert.ok(html.includes('https://api.deepseek.com'));
+  assert.ok(html.includes('方式二：使用 ChatGPT 账号 · Codex'));
+});
+
 test('user data in profile and summary is escaped', () => {
   run(`state.data.profile.name='<img src=x onerror=alert(1)>'`);
   const rendered = run('summaryView()');

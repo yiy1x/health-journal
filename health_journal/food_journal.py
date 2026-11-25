@@ -56,29 +56,28 @@ class FoodJournal:
 
     def save(self, raw, update=False):
         item = validate_food(raw)
-        with self.store.lock, self.store.connection() as database:
-            existing = database.execute("SELECT * FROM food_entries WHERE id=?", (item["id"],)).fetchone()
-            if not update and existing:
-                if all(existing[key] == value for key, value in item.items()):
-                    return dict(existing)
-                raise AppError("这条记录已保存且内容有变化，请刷新后编辑，不会重复新增", 409)
-            if update and (not existing or type(raw.get("version")) is not int or raw["version"] != existing["version"]):
-                raise AppError("记录已被修改或删除，请保留输入并刷新后重试", 409)
+        with self.store.lock:
             if item["document_id"]:
-                if not database.execute("SELECT id FROM documents WHERE id=?", (item["document_id"],)).fetchone():
-                    raise AppError("所选原件不存在，请重新选择", 409)
                 self.store.get_document(item["document_id"])
-            if not update and database.execute("SELECT COUNT(*) FROM food_entries").fetchone()[0] >= LIMIT:
-                raise AppError("独立饮食记录最多 10000 条，请先备份并管理资料", 413)
-            item.update(version=existing["version"] + 1 if update else 1, created_at=existing["created_at"] if update else now(), updated_at=now())
-            if update:
-                if item["version"] > 1000000000:
-                    raise AppError("记录版本超出限制", 409)
-                database.execute("UPDATE food_entries SET date=?,time=?,meal=?,note=?,document_id=?,version=?,updated_at=? WHERE id=?", tuple(item[key] for key in ("date", "time", "meal", "note", "document_id", "version", "updated_at", "id")))
-            else:
-                self.insert(database, item)
-            self.store.audit(database, "update" if update else "create", "food_entry", item["id"])
-            return item
+            with self.store.connection() as database:
+                existing = database.execute("SELECT * FROM food_entries WHERE id=?", (item["id"],)).fetchone()
+                if not update and existing:
+                    if all(existing[key] == value for key, value in item.items()):
+                        return dict(existing)
+                    raise AppError("这条记录已保存且内容有变化，请刷新后编辑，不会重复新增", 409)
+                if update and (not existing or type(raw.get("version")) is not int or raw["version"] != existing["version"]):
+                    raise AppError("记录已被修改或删除，请保留输入并刷新后重试", 409)
+                if not update and database.execute("SELECT COUNT(*) FROM food_entries").fetchone()[0] >= LIMIT:
+                    raise AppError("独立饮食记录最多 10000 条，请先备份并管理资料", 413)
+                item.update(version=existing["version"] + 1 if update else 1, created_at=existing["created_at"] if update else now(), updated_at=now())
+                if update:
+                    if item["version"] > 1000000000:
+                        raise AppError("记录版本超出限制", 409)
+                    database.execute("UPDATE food_entries SET date=?,time=?,meal=?,note=?,document_id=?,version=?,updated_at=? WHERE id=?", tuple(item[key] for key in ("date", "time", "meal", "note", "document_id", "version", "updated_at", "id")))
+                else:
+                    self.insert(database, item)
+                self.store.audit(database, "update" if update else "create", "food_entry", item["id"])
+                return item
 
     @staticmethod
     def insert(database, item):

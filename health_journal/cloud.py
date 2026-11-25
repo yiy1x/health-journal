@@ -16,6 +16,7 @@ from .validation import AppError, boolean, choice, date_value, identifier, stric
 
 PROVIDERS = [
     {"id": "openai", "name": "OpenAI", "base_url": "https://api.openai.com/v1", "pdf": True},
+    {"id": "deepseek", "name": "DeepSeek（深度求索）", "base_url": "https://api.deepseek.com", "pdf": False},
     {"id": "dashscope", "name": "阿里云百炼（中国内地）", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "pdf": False},
     {"id": "siliconflow", "name": "硅基流动", "base_url": "https://api.siliconflow.cn/v1", "pdf": False},
     {"id": "custom", "name": "自定义兼容接口", "base_url": "", "pdf": False},
@@ -58,7 +59,7 @@ def public_addresses(host):
 
 class PinnedHTTPS(http.client.HTTPSConnection):
     def __init__(self, host, address):
-        super().__init__(host, timeout=75)
+        super().__init__(host, timeout=120)
         self.address = address
 
     def connect(self):
@@ -68,6 +69,21 @@ class PinnedHTTPS(http.client.HTTPSConnection):
         except Exception:
             plain.close()
             raise
+
+
+def is_deepseek(config, hostname=""):
+    return config.get("provider") == "deepseek" or hostname == "api.deepseek.com"
+
+
+def wire_messages(messages):
+    formatted = []
+    for message in messages:
+        content = message["content"]
+        if isinstance(content, list) and len(content) == 1 and content[0].get("type") == "text":
+            formatted.append({**message, "content": content[0]["text"]})
+        else:
+            formatted.append(message)
+    return formatted
 
 
 def request_completion(config, key, messages):
@@ -86,9 +102,11 @@ def request_completion(config, key, messages):
             last_error = error
     if connection is None:
         raise AppError("连接模型失败或超时。服务商可能已经收到请求并计费；为避免重复发送，没有自动重试", 503) from last_error
-    payload = {"model": config["model"], "messages": messages, "stream": False}
+    payload = {"model": config["model"], "messages": wire_messages(messages), "stream": False}
     if config["provider"] == "openai":
         payload.update(store=False, max_completion_tokens=4500)
+    elif is_deepseek(config, endpoint.hostname):
+        payload.update(max_tokens=8192, response_format={"type": "json_object"}, thinking={"type": "disabled"})
     else:
         payload["max_tokens"] = 4500
     try:
@@ -97,7 +115,17 @@ def request_completion(config, key, messages):
         if 300 <= response.status < 400:
             raise AppError("API 请求了重定向，已阻止；密钥不会转发到其他地址", 502)
         if response.status != 200:
-            hints = {401: "密钥无效或已过期", 403: "账户没有访问权限", 404: "接口路径或模型不存在", 429: "额度不足或请求过于频繁", 413: "服务商不接受此文件大小"}
+            hints = {
+                400: "请求格式或模型能力不兼容（例如向纯文字模型发送了图片）",
+                401: "密钥无效或已过期",
+                402: "账户余额不足，请先在服务商后台充值",
+                403: "账户没有访问权限",
+                404: "接口路径或模型名不存在（DeepSeek 官方模型名请用 deepseek-flash 或 deepseek-v4-pro）",
+                413: "服务商不接受此文件大小",
+                422: "请求参数或模型名无效",
+                429: "额度不足或请求过于频繁",
+                503: "服务商当前繁忙，请稍后再试",
+            }
             raise AppError("服务商返回 HTTP " + str(response.status) + "：" + hints.get(response.status, "模型、图片/PDF 能力或接口参数不兼容，请核对配置") + "。未自动重试；可先用纯文字尝试。", 502)
         raw = response.read(2 * 1024 * 1024 + 1)
         if len(raw) > 2 * 1024 * 1024:
@@ -106,7 +134,10 @@ def request_completion(config, key, messages):
         answer = result["choices"][0]
         if answer.get("finish_reason") == "length":
             raise AppError("模型输出被截断，未生成可入档草稿；请缩小单次资料范围", 502)
-        return text(answer["message"]["content"], "模型输出", 50000, True)
+        content = answer.get("message", {}).get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise AppError("模型返回了空内容（可能是模型不支持当前输入或 JSON 输出被过滤）；未自动重试", 502)
+        return text(content, "模型输出", 50000, True)
     except AppError:
         raise
     except (OSError, http.client.HTTPException):
@@ -218,7 +249,13 @@ class CloudAI:
 
     def config(self):
         with self.lock:
-            return {**(self.store.setting("cloud_config") or DEFAULT_CONFIG), "has_key": bool(self.key), "revision": self.revision, "providers": PROVIDERS, "key_storage": "memory-only"}
+            return {
+                **(self.store.setting("cloud_config") or DEFAULT_CONFIG),
+                "has_key": bool(self.key),
+                "revision": self.revision,
+                "providers": [dict(provider) for provider in PROVIDERS],
+                "key_storage": "memory-only",
+            }
 
     def configure(self, raw):
         provider = choice(raw.get("provider"), [item["id"] for item in PROVIDERS], "服务商")
@@ -228,6 +265,8 @@ class CloudAI:
         if key and (not key.isascii() or any(ord(char) < 33 or ord(char) > 126 for char in key)):
             raise AppError("API Key 包含不允许的字符")
         with self.lock:
+            if self.busy:
+                raise AppError("已有模型请求处理中，请等待结束后再修改配置", 409)
             if raw.get("revision") != self.revision:
                 raise AppError("模型配置已改变，请刷新后重新填写", 409)
             previous = self.config()

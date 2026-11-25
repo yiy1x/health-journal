@@ -1,5 +1,13 @@
 # 本地 API 与数据约束
 
+## DeepSeek 兼容适配（1.5 补充）
+
+`cloud.py` 新增 `deepseek` 预设（`https://api.deepseek.com`），同时兼容在 `custom` 下填写 `https://api.deepseek.com` 或 `https://api.deepseek.com/v1`：
+
+- 纯文字请求将 `messages[].content` 归一化为字符串，避免只接受字符串 `content` 的兼容端点返回 400；携带图片或 PDF 时继续发送多模态数组。
+- 对 DeepSeek 请求显式设置 `thinking: {"type": "disabled"}`、`response_format: {"type": "json_object"}` 与 `max_tokens: 8192`，避免默认思考模式消耗完输出长度导致草稿被截断或返回空白内容；不依赖 OpenAI 专用的 `store` / `max_completion_tokens`。
+- 补充 `402`（余额不足）、`422`（参数或模型名无效）和空 `content` 的中文错误提示；公网 HTTPS 连接超时调整为 120 秒，仍保持全公网 DNS 校验、固定 IP、禁止重定向与不自动重试。
+
 ## 日常手记（1.5）
 
 数据库 schema v4，新增 `food_entries`，不替换旧餐单/分析记录。新接口使用同一回环/随机令牌/跨站/严格 JSON 保护：

@@ -222,3 +222,26 @@ test('new food submission omits zero version and deleting edited food refreshes 
   app.requests.at(-2).resolve(snapshot()); app.requests.at(-1).resolve({day:'2026-01-02',metrics:{}}); await deleting;
   assert.equal(refreshed,1);
 });
+
+test('stale source choice resets after source disappears and missing detail/job guards do not throw', async () => {
+  const app = harness();
+  app.ui.state.day = '2026-01-02';
+  app.ui.state.choices.steps = 'a'.repeat(64);
+  const loading = app.ui.load({ metric: 'steps', from: '2026-01-02', to: '2026-01-02', source: 'a'.repeat(64) });
+  assert.equal(app.requests.length, 2);
+  app.requests[0].resolve(snapshot(null));
+  app.requests[1].resolve({ day: '2026-01-02', metrics: { steps: { value: null, count: 0, sources: [], warning: '未记录' } } });
+  await tick();
+  assert.equal(app.requests.length, 4);
+  assert.equal(app.ui.state.choices.steps, '');
+  assert.equal(app.ui.state.query.source, '');
+  app.requests[2].resolve(snapshot(4200));
+  app.requests[3].resolve({ day: '2026-01-02', metrics: { steps: { value: 4200, count: 1, sources: [{ source: 'b'.repeat(64), source_name: 'Watch', device: '' }], warning: '' } } });
+  await loading;
+  assert.equal(app.ui.state.dashboard.daily[0].value, 4200);
+  for (const wearable of ['previous', 'next', 'cancel']) {
+    const target = { disabled: false, dataset: { wearable }, closest: () => target };
+    await app.listeners.click({ target });
+  }
+  assert.equal(app.requests.length, 4);
+});

@@ -1,6 +1,24 @@
-:root { --daily-ink: #183b38; --daily-green: #247b68; --daily-muted: #5d706e; --daily-line: #dce6e2; }
+:root { --daily-ink: var(--ink); --daily-green: var(--green); --daily-muted: var(--muted); --daily-line: var(--line); }
 .sidebar { background: #203c3b; padding-top: 26px; }
 .sidebar nav { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.nav-group { margin-bottom: 18px; }
+.nav-group .workspace-label { margin: 0 14px 8px; color: #90aba2; font-size: 11px; letter-spacing: .8px; }
+.sidebar-utility { margin-top: 10px; padding-top: 12px; border-top: 1px solid #32544f; }
+.section-subtabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 22px; padding: 5px; background: #e7efeb; border: 1px solid var(--daily-line); border-radius: 12px; width: fit-content; max-width: 100%; }
+.section-subtabs a { padding: 8px 15px; border-radius: 8px; font-size: 13px; color: #4a635e; font-weight: 500; min-height: 36px; display: inline-flex; align-items: center; }
+.section-subtabs a:hover { color: var(--daily-ink); background: #f3f8f5; }
+.section-subtabs a.active { background: #fff; color: var(--daily-ink); font-weight: 600; box-shadow: 0 1px 3px #183b3814; }
+.compact-model-shell { display: grid; gap: 18px; max-width: 860px; }
+.compact-model-shell .panel { margin-bottom: 0; }
+.compact-details { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--daily-line); font-size: 12px; color: #5c726d; }
+.compact-details summary { cursor: pointer; font-weight: 500; color: #365a52; }
+.compact-details ul { margin: 10px 0 0; padding-left: 18px; line-height: 1.8; }
+.codex-fold { padding: 18px 22px; }
+.codex-fold > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; color: var(--daily-ink); }
+.codex-fold > summary::-webkit-details-marker { display: none; }
+.codex-fold > summary span { font-size: 12px; color: #397269; font-weight: 500; }
+.codex-fold-body { margin-top: 16px; }
+.codex-fold-body .codex-connection { margin: 0; border: 0; padding: 0; box-shadow: none; }
 .sidebar nav::-webkit-scrollbar { width: 4px; }
 .sidebar nav::-webkit-scrollbar-track { background: transparent; }
 .sidebar nav::-webkit-scrollbar-thumb { background: #527269; border-radius: 4px; }
@@ -12,11 +30,28 @@
 .nav-item.active { background: #e3eee7; color: #1e5e50; }
 .sidebar-bottom { padding-top: 20px; }
 .topbar { height: 66px; }
-.workspace { background: #f4f7f5; }
+.workspace { background: var(--canvas); }
 .page-heading p, .panel-heading p, .page-note { color: #657772; }
-.button.primary { background: #286b5a; }
+.button.primary { background: var(--green); }
 .button.primary:hover { background: #205444; }
 .button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid #267660; outline-offset: 3px; }
+.page-heading > div:first-child, .topbar-right, .breadcrumb { min-width: 0; }
+.page-heading p { max-width: 60ch; }
+.topbar-right { max-width: 55%; }
+.local-indicator { overflow: hidden; text-overflow: ellipsis; display: block; }
+.local-indicator i { display: inline-block; margin-right: 5px; }
+.avatar { flex: 0 0 34px; background: var(--sage); color: var(--green); }
+.form-footer { flex-wrap: wrap; }
+.button { border-radius: 8px; }
+.empty-state p, .field small, .field > span, .check-label, .privacy-list dd, .privacy-list dt, .settings-aside p, .settings-aside small,
+.assistant-intro p, .assistant-placeholder p, .assistant-aside .panel p, .capability-list li, .question-chips button,
+.panel-footnote, .recipe-method, .ingredient-list, .document-name small, .folder-count, .summary-row small { color: var(--muted); font-size: 12px; }
+.page-footer, .audit-list time, .stat-strip small, .reminder-note, .source-line, .results-meta span { color: var(--muted); }
+.question-chips button { min-height: 40px; background: #f4f8f5; }
+.analysis-placeholder-icon { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 18px; color: var(--green); background: var(--sage); margin: 0 auto 20px; }
+.analysis-placeholder-icon .icon { width: 30px; height: 30px; }
+.analysis-empty p { max-width: 48ch; margin-left: auto; margin-right: auto; color: var(--muted); }
+.specialty-overview { background: #eaf2ed; border-color: var(--line); }
 .daily-workspace { --muted: #627570; max-width: 1200px; margin: 0 auto; }
 .daily-home-entry { display: flex; justify-content: space-between; gap: 15px; align-items: center; margin-bottom: 25px; padding: 17px 20px; border: 1px solid #d4e5d8; border-radius: 12px; background: #e8f2e9; color: #386447; }
 .daily-home-entry > span { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
@@ -148,6 +183,19 @@
 @media (max-width: 1150px) { .daily-calendar { flex-direction: column; gap: 8px; align-items: stretch; } .daily-date-control { justify-content: center; } .daily-layout { grid-template-columns: minmax(0, 1.25fr) minmax(255px, 1fr); gap: 16px; } .daily-section-title { flex-wrap: wrap; } }
 @media (max-width: 900px) { .daily-layout { grid-template-columns: minmax(0, 1fr); } .daily-body-column { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } .daily-vitals { margin: 0; } .daily-local-card { grid-column: 1 / -1; } .daily-trend-filters { grid-template-columns: 1fr 1fr; } .daily-page-heading { align-items: flex-start; } }
 @media (max-width: 720px) {
+  .section-subtabs { width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+  .section-subtabs a { white-space: nowrap; min-height: 40px; }
+  .topbar { height: calc(58px + env(safe-area-inset-top)); }
+  .topbar-right { max-width: 50%; gap: 10px; }
+  .breadcrumb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .page-heading { align-items: stretch; }
+  .question-chips { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .question-chips button { text-align: left; min-height: 44px; }
+  .assistant-controls { flex-wrap: wrap; }
+  .assistant-controls > .button { width: 100%; }
+  .connection-form .form-footer .button { white-space: normal; }
+  .codex-fold > summary { align-items: flex-start; }
+  .codex-fold > summary span { flex-shrink: 0; }
   .daily-meal-plan-link { flex-direction: column; align-items: stretch; }
   .daily-workspace { margin: 0 -2px; }
   .daily-page-heading { flex-direction: column; gap: 17px; margin-bottom: 20px; }

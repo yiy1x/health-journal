@@ -155,7 +155,65 @@ class CloudTests(unittest.TestCase):
         self.configure(provider="custom", base_url="https://example.com/v1", api_key="")
         self.assertFalse(self.cloud.config()["has_key"])
 
+    def test_deepseek_preset_and_custom_url_payload_and_errors(self):
+        saved = self.configure(provider="deepseek", model="deepseek-flash", vision=True)
+        self.assertEqual(saved["base_url"], "https://api.deepseek.com")
+        sent_payloads = []
+        class CaptureConnection:
+            status = 200
+            reply = json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(FOOD)}}]}).encode()
+            def __init__(self, host, address):
+                self.host = host
+            def connect(self):
+                pass
+            def request(self, method, path, body=None, headers=None):
+                sent_payloads.append((self.host, path, json.loads(body.decode("utf-8"))))
+            def getresponse(self):
+                status, reply = self.status, self.reply
+                class Response:
+                    def read(self, limit):
+                        return reply
+                response = Response()
+                response.status = status
+                return response
+            def close(self):
+                pass
+        consent = self.prepare(text="合成早餐鸡蛋")
+        with mock.patch("health_journal.cloud.public_addresses", return_value=["93.184.216.34"]), mock.patch("health_journal.cloud.PinnedHTTPS", CaptureConnection):
+            self.cloud.run({"approval_id": consent["approval_id"], "confirm": True})
+        host, path, payload = sent_payloads[0]
+        self.assertEqual((host, path), ("api.deepseek.com", "/chat/completions"))
+        self.assertIsInstance(payload["messages"][1]["content"], str)
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertEqual(payload["max_tokens"], 8192)
+        self.assertNotIn("store", payload)
+        doc = self.store.add_document("synthetic.png", b"\x89PNG\r\n\x1a\nsynthetic")
+        image_consent = self.prepare(document_id=doc["id"])
+        with mock.patch("health_journal.cloud.public_addresses", return_value=["93.184.216.34"]), mock.patch("health_journal.cloud.PinnedHTTPS", CaptureConnection):
+            self.cloud.run({"approval_id": image_consent["approval_id"], "confirm": True})
+        self.assertIsInstance(sent_payloads[1][2]["messages"][1]["content"], list)
+        self.configure(provider="custom", base_url="https://api.deepseek.com/v1", model="deepseek-v4-pro", vision=False, api_key=FAKE_KEY)
+        custom_consent = self.prepare(text="合成自定义地址测试")
+        with mock.patch("health_journal.cloud.public_addresses", return_value=["93.184.216.34"]), mock.patch("health_journal.cloud.PinnedHTTPS", CaptureConnection):
+            self.cloud.run({"approval_id": custom_consent["approval_id"], "confirm": True})
+        self.assertEqual(sent_payloads[2][1], "/v1/chat/completions")
+        self.assertEqual(sent_payloads[2][2]["thinking"], {"type": "disabled"})
+        CaptureConnection.status = 402
+        with mock.patch("health_journal.cloud.public_addresses", return_value=["93.184.216.34"]), mock.patch("health_journal.cloud.PinnedHTTPS", CaptureConnection), self.assertRaisesRegex(AppError, "余额不足"):
+            request_completion({"provider": "deepseek", "base_url": "https://api.deepseek.com", "model": "deepseek-flash"}, FAKE_KEY, [{"role": "user", "content": "hi"}])
+        CaptureConnection.status = 200
+        CaptureConnection.reply = json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": "   "}}]}).encode()
+        with mock.patch("health_journal.cloud.public_addresses", return_value=["93.184.216.34"]), mock.patch("health_journal.cloud.PinnedHTTPS", CaptureConnection), self.assertRaisesRegex(AppError, "空内容"):
+            request_completion({"provider": "deepseek", "base_url": "https://api.deepseek.com", "model": "deepseek-flash"}, FAKE_KEY, [{"role": "user", "content": "hi"}])
+
     def test_stale_config_and_header_injection_rejected(self):
+        self.cloud.busy = True
+        try:
+            with self.assertRaises(AppError):
+                self.configure(model="blocked-while-busy")
+        finally:
+            self.cloud.busy = False
         for changes in ({"revision": "stale"}, {"api_key": "a\r\nHeader:value"}):
             with self.subTest(changes=changes), self.assertRaises(AppError):
                 self.configure(**changes)

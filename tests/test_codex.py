@@ -78,6 +78,11 @@ class CodexTests(unittest.TestCase):
         self.configure()
 
     def test_prepare_does_not_send_and_run_uses_frozen_input(self):
+        snapshot = self.ai.config()
+        snapshot["account"]["email"] = "tampered@example.invalid"
+        snapshot["models"].clear()
+        self.assertNotEqual(self.ai.config()["account"]["email"], "tampered@example.invalid")
+        self.assertTrue(self.ai.config()["models"])
         consent = self.prepare()
         self.assertFalse(any(row.get("method") == "turn/start" for row in self.ai.rpc.messages()))
         self.store.profile(adult(name="未授权秘密姓名"))
