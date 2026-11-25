@@ -1,5 +1,41 @@
 # 本地 API 与数据约束
 
+## 日常手记（1.5）
+
+数据库 schema v4，新增 `food_entries`，不替换旧餐单/分析记录。新接口使用同一回环/随机令牌/跨站/严格 JSON 保护：
+
+| 接口 | 行为 |
+| --- | --- |
+| `POST /api/food` | `{id,date,time,meal,note,document_id}`；id 为客户端 UUID，同 id 同内容重复请求返回已存内容，不重复新增；不同内容冲突 409 |
+| `PUT /api/food` | 同字段加 `version`；旧版本/已删除返回 409；不能用 PUT 创建不存在的记录 |
+| `DELETE /api/food` | `{id,version,confirm:true}`；只删除日记，照片保留 |
+| `GET /api/food?from=...&to=...` | 返回 1–366 日的独立实际饮食，按日期/时间/ID 排序 |
+| `GET /api/day?date=...` | 当天 steps/sleep/heart_rate/distance 概况；可附每项 `*_source`，指标独立选择来源，不改变原样本 |
+
+`time` 可空或 HH:MM，`meal` 为 breakfast/lunch/dinner/snack，`note` 必填最多 2000 字符，日期不能晚于本地服务今天，原件必须存在并通过校验；最多 10000 条。查询拒绝未知或重复参数。
+
+`GET /api/wearables` 的 meals 新增独立日记 `origin:journal`，旧餐单为 `origin:plan`、AI 旁人工核对备注为 `origin:analysis`。不自动合并同餐，保留编辑来源。`/api/state` 不返回整个饮食表；按日期查询。AI `include_records` 不增加对新日记的隐含读取。
+
+有日记时 ZIP manifest 使用 v4，必须包含 `food_entries`；可带已有 `wearable`/`wearable.jsonl`。无日记的备份仍用 v2/v3。恢复验证记录、版本、日期和附件引用，整体事务写新空库。旧程序不能打开新 schema 或 v4 备份。
+
+## Apple 健康 / 日常健康（1.4）
+
+统一受回环会话、Host/Origin/Fetch Metadata 和 JSON 严格检查保护。全部为本机操作，不访问 Apple 账号或远程网络。
+
+| 方法与路径 | 输入和行为 |
+| --- | --- |
+| `POST /api/wearables/import` | 二进制 ZIP/XML，`Content-Type: application/octet-stream`、百分号编码 `X-Filename` 和明确 Content-Length；上限 256 MiB，返回 202 和 job ID |
+| `GET /api/wearables/import` | 当前 job 状态 `idle/uploading/parsing/ready/error/cancelled/completed`、进度、有效/重复/跳过报告；不返回原 XML |
+| `DELETE /api/wearables/import` | `{id}`，取消对应预览/解析，不删除已提交样本 |
+| `POST /api/wearables/commit` | `{id,metrics:[...],from,to,confirm:true}`；冻结预览、类型/结束日期范围、本人确认，事务保存；过期/重复消费 409 |
+| `GET /api/wearables?from=YYYY-MM-DD&to=YYYY-MM-DD&metric=steps&source=` | 最多 366 日；返回 catalog、来源、日值、实际饮食与导入批次；source 为空时多来源日值留空 |
+| `GET /api/wearables/details?day=YYYY-MM-DD&metric=steps&source=&offset=0` | 一页最多 50 条，返回原值/单位、标准化值、时间、来源和手工标记 |
+| `DELETE /api/wearables/batches` | `{id,confirm:true}`，删除批次引用及无其他批次引用的样本；不修改 Apple 健康或饮食 |
+
+查询不接受重复/未知参数；ID 和 source 都是应用生成的不可执行标识，不是文件路径。`/api/state` 只增加 `wearables` 的指标目录、样本计数、最早/最近日期概况，不返回百万条样本。设备数据不加入 AI 默认或 `include_records` 摘录。
+
+SQLite schema v3；有设备数据的便携备份清单 v3 声明 `wearable: {path:"wearable.jsonl",sha256}`。JSONL 依序保存 batch/sample/member，检查原值标准化一致性、身份哈希、批次数量和范围引用，恢复只能到空档案并与其它数据事务提交。上限与完整口径见 [APPLE_HEALTH.md](APPLE_HEALTH.md)。
+
 ## 空白个人档案（1.3.1）
 
 新建目录不预置资料。`profile.name` 可为空字符串；`profile.diet` 支持 `unspecified`（未填写，初始值）、`balanced`、`vegetarian`。出生日期/联系人/备注/饮食医嘱为空，性别初始 `unspecified`，过敏数组为空、膳食确认 false，不等于无过敏或可安全生成餐单。`diet` 未选择时，即使勾选一般成人适用确认，生成餐单仍返回 422。已有设置不自动清除。

@@ -14,6 +14,74 @@ from tests.test_cloud import FAKE_KEY, FOOD, REPORT
 
 
 class HTTPTests(unittest.TestCase):
+    def test_food_http_lifecycle_and_diary_day(self):
+        from tests.test_food_journal import food
+        raw = food()
+        status, _, saved = self.request('POST','/api/food',data=raw)
+        self.assertEqual(status,201)
+        self.assertEqual(self.request('POST','/api/food',data=raw)[2],saved)
+        self.assertEqual(self.request('GET','/api/food?from='+TODAY+'&to='+TODAY)[2],[saved])
+        self.assertEqual(self.request('GET','/api/day?date='+TODAY)[2]['day'],TODAY)
+        self.assertEqual(self.request('GET','/api/wearables?from='+TODAY+'&to='+TODAY)[2]['meals'][0]['origin'],'journal')
+        changed = {**saved, 'note':'synthetic updated'}
+        self.assertEqual(self.request('PUT','/api/food',data=changed)[0],200)
+        self.assertEqual(self.request('PUT','/api/food',data=changed)[0],409)
+        self.assertEqual(self.request('DELETE','/api/food',data={'id':saved['id'],'version':2,'confirm':True})[0],200)
+        self.assertEqual(self.request('GET','/api/food?from='+TODAY+'&to='+TODAY)[2],[])
+
+    def test_food_and_day_endpoints_reject_unauthorized_ambiguous_inputs(self):
+        from tests.test_food_journal import food
+        for method, path in (('POST','/api/food'),('PUT','/api/food'),('DELETE','/api/food'),('GET','/api/food'),('GET','/api/day')):
+            self.assertEqual(self.request(method,path,data={},token=False)[0],401)
+            self.assertEqual(self.request(method,path,data={},headers={'Origin':'https://evil.invalid'})[0],403)
+        for path in ('/api/day?date='+TODAY+'&date='+TODAY, '/api/day?date='+TODAY+'&steps_source=evil', '/api/food', '/api/food?from='+TODAY+'&to='+TODAY+'&extra=1'):
+            self.assertEqual(self.request('GET',path)[0],400)
+        self.assertEqual(self.request('POST','/api/food',data=food(note=''))[0],400)
+        self.assertEqual(self.request('GET','/daily.css',token=False)[0],200)
+    def apple_preview(self):
+        from tests.test_wearables import export_xml
+        status, _, result = self.request("POST", "/api/wearables/import", body=export_xml(), headers={"Content-Type": "application/octet-stream", "X-Filename": quote("合成健康.xml")})
+        self.assertEqual(status, 202)
+        self.server.wearables.job["worker"].join(timeout=5)
+        result = self.request("GET", "/api/wearables/import")[2]
+        self.assertEqual(result["state"], "ready")
+        return result
+
+    def test_apple_import_preview_confirm_daily_detail_and_delete(self):
+        result = self.apple_preview()
+        self.assertEqual(self.request("GET", "/api/state")[2]["wearables"]["samples"], 0)
+        body = {"id": result["id"], "metrics": ["steps"], "from": "2026-01-02", "to": "2026-01-02", "confirm": True}
+        status, _, saved = self.request("POST", "/api/wearables/commit", data=body)
+        self.assertEqual(status, 200)
+        self.assertEqual(saved["imported"], 1)
+        daily = self.request("GET", "/api/wearables?from=2026-01-02&to=2026-01-03")[2]
+        self.assertEqual(daily["daily"][0]["value"], 100)
+        self.assertIsNone(daily["daily"][1]["value"])
+        self.assertEqual(self.request("GET", "/api/wearables/details?day=2026-01-02&metric=steps")[2]["total"], 1)
+        self.assertEqual(self.request("POST", "/api/wearables/commit", data=body)[0], 409)
+        self.assertEqual(self.request("DELETE", "/api/wearables/batches", data={"id": saved["batch_id"], "confirm": True})[0], 200)
+        self.assertEqual(self.request("GET", "/api/state")[2]["wearables"]["samples"], 0)
+
+    def test_apple_import_endpoints_require_local_session_and_confirmation(self):
+        for method, path in (("GET", "/api/wearables"), ("GET", "/api/wearables/import"), ("POST", "/api/wearables/import"), ("POST", "/api/wearables/commit"), ("DELETE", "/api/wearables/import"), ("DELETE", "/api/wearables/batches"), ("GET", "/api/wearables/details")):
+            with self.subTest(path=path, method=method):
+                self.assertEqual(self.request(method, path, data={}, token=False)[0], 401)
+                self.assertEqual(self.request(method, path, data={}, headers={"Origin": "https://evil.invalid"})[0], 403)
+        result = self.apple_preview()
+        self.assertEqual(self.request("POST", "/api/wearables/commit", data={"id": result["id"]})[0], 400)
+        self.assertEqual(self.request("DELETE", "/api/wearables/import", data={"id": result["id"]})[0], 200)
+        self.assertEqual(self.request("GET", "/api/state")[2]["wearables"]["samples"], 0)
+
+    def test_apple_upload_type_size_query_validation_and_private_files(self):
+        self.assertEqual(self.request("POST", "/api/wearables/import", body=b"x")[0], 415)
+        with mock.patch("health_journal.server.MAX_UPLOAD", 1):
+            self.assertEqual(self.request("POST", "/api/wearables/import", body=b"xx", headers={"Content-Type": "application/octet-stream", "X-Filename": "export.xml"})[0], 413)
+        for query in ("from=2026-01-02&from=2026-01-03&to=2026-01-03", "from=2026-01-02&to=2026-01-03&source=bad", "from=2026-01-02&to=2026-01-03&surprise=1"):
+            self.assertEqual(self.request("GET", "/api/wearables?" + query)[0], 400)
+        self.assertEqual(self.request("GET", "/api/wearables/details?day=2026-01-02&metric=steps&offset=-1")[0], 400)
+        self.assertEqual(self.request("GET", "/.health-import-x/input")[0], 404)
+        self.assertEqual(self.request("GET", "/wearables.js", token=False)[0], 200)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="health-journal-http-")
         self.server = create_server(self.temp.name, 0)

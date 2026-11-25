@@ -1,5 +1,19 @@
 # 知己 · 健康手记：实现说明与 GitHub 发布交接
 
+## 2026-11-25 增补：1.5.0 与开发仓库统一
+
+当前版本 1.5.0：新增独立 `food_journal.py`、`food_entries` 表、日常手记重构、`web/daily.css`、按日设备概况及照片关联；schema v4、含独立日记的 ZIP v4，保留旧餐单/AI 记录及来源。设计/用法/测试见 [DAILY_JOURNAL.md](DAILY_JOURNAL.md)、[研究记录](research/2026-11-25-daily-journal-ux.md)、[1.5 验收](ACCEPTANCE-v1.5.0.md)。
+
+用户已明确指定统一到 [yiy1x/health-journal](https://github.com/yiy1x/health-journal)。原工作目录接入已有 main 历史，远端修正与本地 1.4/1.5 功能一并保留，不采用无关历史覆盖或强推。**下方历史正文关于“无 remote/无提交”的描述仅是旧交接时点，不再代表当前状态。** 当前基线、备份和维护流程见 [RECONCILIATION.md](RECONCILIATION.md)，接手前仍须读取实际 Git 状态。源码维护只在本聊天原工作目录进行，临时远端比较克隆不是第二个开发目录。私人档案不随 Git 操作读取、迁移或发布。
+
+## 2026-11-22 增补：当前源码已迭代到 1.4.0
+
+**下方正文保留 1.3.1 交接时点，不要把旧版本/11 页面/schema v2/259 测试作为当前结论。** 1.4 新增 Apple 健康官方 ZIP/XML 本地导入、18 类设备日常指标、来源核对、样本分页、实际饮食同日回顾和 TXT 导出；十二个页面、SQLite schema v3、含设备数据的备份 v3。默认空库，不读取 Apple ID/iCloud、不自动外发设备资料；未实现原生 HealthKit 自动同步。
+
+新代码：`health_journal/apple_health.py`（流式解析/单位/时区/安全边界）、`health_journal/wearables.py`（预览管理/事务/去重/统计/备份）、`health_journal/web/wearables.js`（页面/导入/筛选/明细/回顾），以及 server/store/样式集成。新增 `tests/test_wearables.py`、`tests/web-wearables.test.cjs`、`tests/wearable_browser_fixture.py` 与 HTTP 测试。研究和发布依据：[研究报告](research/2026-11-22-apple-health-integration.md)、[使用说明](APPLE_HEALTH.md)、[最新验收](ACCEPTANCE-v1.4.0.md)。
+
+发布必须排除 `.health-import-*`、Apple 原始导出、当前/旧本地库与凭证；不要把 TXT 回顾说成自动手机同步。原生接入需要完整 Xcode/签名/用户逐类型权限/真机测试，本轮只实现完整文件链路。构建新产物、检查当前测试及 Git 状态，不要使用下文旧哈希或旧包做 1.4 Release。
+
 > 交接日期：2026-11-16（Asia/Shanghai）  
 > 当前源码版本：**1.3.1**  
 > 面向对象：接手代码审查、首次 GitHub 提交、README/项目摘要/Release Notes 撰写的开发者或大模型。  

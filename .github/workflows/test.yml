@@ -45,6 +45,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: node --check health_journal/web/app.js
+      - run: node --check health_journal/web/wearables.js
       - run: node --check health_journal/web/phone/phone.js
       - run: node --check health_journal/web/phone/core.js
       - run: node --check health_journal/web/phone/db.js

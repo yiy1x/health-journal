@@ -8,6 +8,8 @@
   <title>知己 · 健康手记</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/daily.css">
+  <script src="/wearables.js" defer></script>
   <script type="module" src="/app.js"></script>
 </head>
 <body>
@@ -20,6 +22,7 @@
     <div class="modal-footer"><button type="button" class="button secondary" id="leave-cancel" autofocus>继续编辑</button><button type="button" class="button primary" id="leave-confirm">放弃未保存输入</button></div>
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
+  <input id="apple-health-upload" type="file" accept=".zip,.xml" hidden aria-label="选择 Apple 健康 ZIP 或 XML">
   <input id="file-upload" type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" multiple hidden aria-label="选择原始资料">
   <input id="camera-upload" type="file" accept="image/jpeg,image/png" capture="environment" hidden aria-label="拍摄原始资料">
   <input id="album-upload" type="file" accept="image/jpeg,image/png" multiple hidden aria-label="选择相册照片">

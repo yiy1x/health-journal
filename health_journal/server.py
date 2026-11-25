@@ -1,15 +1,20 @@
 import datetime
 import hmac
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import secrets
+import time
 import urllib.parse
 
 from . import __version__
 from .assistant import EMERGENCY, grounded_answer, model_answer, ollama_request
 from .cloud import CloudAI
 from .codex_ai import CodexAI
+from .apple_health import MAX_UPLOAD
+from .wearables import Wearables, summary as wearable_summary
+from .food_journal import FoodJournal
 from .departments import CATALOG
 from .nutrition import BY_ID, MEALS, NOTICE, RECIPES, eligible, make_plan, restrictions, validate_plan
 from .store import MAX_BACKUP, MAX_FILE, Store, encode
@@ -31,10 +36,13 @@ class JournalServer(ThreadingHTTPServer):
         self.token = secrets.token_hex(32)
         self.cloud = CloudAI(store)
         self.codex = CodexAI(store, codex_executable)
+        self.wearables = Wearables(store)
+        self.food = FoodJournal(store)
         super().__init__(address, Handler)
 
     def server_close(self):
         self.codex.close()
+        self.wearables.close()
         super().server_close()
 
 
@@ -72,7 +80,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send(status, encode(value).encode("utf-8"))
 
     def guard(self, require_token=True):
-        for header in ("Host", "Origin", "Sec-Fetch-Site", "X-Journal-Token", "Content-Type", "Content-Length", "X-Confirm-Transfer"):
+        for header in ("Host", "Origin", "Sec-Fetch-Site", "X-Journal-Token", "Content-Type", "Content-Length", "X-Confirm-Transfer", "X-Filename"):
             if len(self.headers.get_all(header, [])) > 1:
                 raise AppError("拒绝重复的请求头", 400)
         port = self.server.server_address[1]
@@ -117,6 +125,36 @@ class Handler(BaseHTTPRequestHandler):
             raise AppError("请求必须是 JSON 对象")
         return raw
 
+    def apple_upload(self):
+        if self.headers.get("Content-Type", "").split(";")[0] != "application/octet-stream" or self.headers.get("Transfer-Encoding"):
+            raise AppError("Apple 导出须作为二进制文件上传", 415)
+        try:
+            size = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            raise AppError("缺少有效文件长度", 411)
+        if not 0 < size <= MAX_UPLOAD:
+            raise AppError("单个 ZIP/XML 最多 256 MiB；可以解压后选择主 XML，仍须遵守限额", 413)
+        job = self.server.wearables.reserve(urllib.parse.unquote(self.headers.get("X-Filename", "")))
+        path = Path(job["temporary"].name) / "input"
+        try:
+            digest = hashlib.sha256()
+            remaining = size
+            deadline = time.monotonic() + 180
+            with path.open("xb") as output:
+                while remaining:
+                    if job["cancelled"].is_set() or time.monotonic() > deadline:
+                        raise AppError("导入已取消", 409)
+                    chunk = self.rfile.read(min(65536, remaining))
+                    if not chunk:
+                        raise AppError("文件上传不完整")
+                    output.write(chunk)
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+            return self.server.wearables.launch(job, path, digest.hexdigest())
+        except Exception:
+            self.server.wearables.upload_failed(job)
+            raise
+
     def do_GET(self):
         self.dispatch("GET")
 
@@ -140,6 +178,8 @@ class Handler(BaseHTTPRequestHandler):
                 if method != "GET":
                     raise AppError("不支持的方法", 405)
                 assets = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8"), "/favicon.svg": ("favicon.svg", "image/svg+xml")}
+                assets["/wearables.js"] = ("wearables.js", "text/javascript; charset=utf-8")
+                assets["/daily.css"] = ("daily.css", "text/css; charset=utf-8")
                 if path == "/phone/catalog.json":
                     self.json_response(CATALOG)
                     return
@@ -172,7 +212,46 @@ class Handler(BaseHTTPRequestHandler):
                 snapshot = {"version": __version__, "today": datetime.date.today().isoformat(), "profile": store.profile(), "profile_version": store.profile_version(), "records": store.records(), "documents": store.documents(), "plans": store.plans(), "recipes": RECIPES, "allergens": ALLERGENS, "nutrition_restrictions": restrictions(store.profile(), store.records()), "audits": store.audits(), "model": store.setting("model"), "demo": bool(store.setting("demo")), "data_directory": str(store.directory), "nutrition_notice": NOTICE, "safety": EMERGENCY, "departments": CATALOG, "analyses": store.analyses()}
             snapshot["cloud"] = self.server.cloud.config()
             snapshot["codex"] = self.server.codex.config()
+            with store.lock, store.connection() as database:
+                snapshot["wearables"] = wearable_summary(database)
             self.json_response(snapshot)
+        elif path == "/api/wearables/import" and method == "POST":
+            self.json_response(self.apple_upload(), 202)
+        elif path == "/api/food" and method in ("POST", "PUT"):
+            self.json_response(self.server.food.save(self.json_body(), update=method == "PUT"), 201 if method == "POST" else 200)
+        elif path == "/api/food" and method == "DELETE":
+            self.json_response(self.server.food.delete(self.json_body()))
+        elif path in ("/api/food", "/api/day") and method == "GET":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
+            allowed = {"from", "to"} if path == "/api/food" else {"date", "steps_source", "sleep_source", "heart_rate_source", "distance_source"}
+            if set(query) - allowed or any(len(value) != 1 for value in query.values()):
+                raise AppError("日记查询参数无效")
+            values = {key: value[0] for key, value in query.items()}
+            if path == "/api/food":
+                self.json_response(self.server.food.entries(values.get("from", ""), values.get("to", "")))
+            else:
+                self.json_response(self.server.wearables.day(values.get("date", ""), {key.removesuffix("_source"): value for key, value in values.items() if key != "date"}))
+        elif path == "/api/wearables/import" and method == "GET":
+            self.json_response(self.server.wearables.status())
+        elif path == "/api/wearables/import" and method == "DELETE":
+            self.json_response(self.server.wearables.cancel(self.json_body().get("id")))
+        elif path == "/api/wearables/commit" and method == "POST":
+            self.json_response(self.server.wearables.commit(self.json_body()))
+        elif path == "/api/wearables/batches" and method == "DELETE":
+            self.json_response(self.server.wearables.delete(self.json_body()))
+        elif path in ("/api/wearables", "/api/wearables/details") and method == "GET":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
+            allowed = {"from", "to", "metric", "source"} if path == "/api/wearables" else {"day", "metric", "source", "offset"}
+            if set(query) - allowed or any(len(value) != 1 for value in query.values()):
+                raise AppError("健康数据查询参数无效")
+            values = {key: value[0] for key, value in query.items()}
+            if path == "/api/wearables":
+                self.json_response(self.server.wearables.overview(values.get("from", ""), values.get("to", ""), values.get("metric", "steps"), values.get("source", "")))
+            else:
+                offset = values.get("offset", "0")
+                if not offset.isascii() or not offset.isdigit():
+                    raise AppError("分页参数无效")
+                self.json_response(self.server.wearables.details(values.get("day", ""), values.get("metric", "steps"), values.get("source", ""), int(offset)))
         elif path == "/api/codex/config" and method == "PUT":
             self.json_response(self.server.codex.configure(self.json_body()))
         elif path == "/api/codex/prepare" and method == "POST":

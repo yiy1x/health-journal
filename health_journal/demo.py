@@ -8,6 +8,11 @@ from .validation import AppError
 def seed_demo(store):
     if store.setting("demo"):
         return
+    with store.connection() as database:
+        if database.execute("SELECT COUNT(*) FROM wearable_samples").fetchone()[0]:
+            raise AppError("已有个人设备样本，不能混入演示资料")
+        if database.execute("SELECT COUNT(*) FROM food_entries").fetchone()[0]:
+            raise AppError("已有个人饮食日记，不能混入演示资料")
     if store.records() or store.documents() or store.plans() or store.analyses() or store.profile() != DEFAULT_PROFILE:
         raise AppError("演示数据只能加载到新的独立目录，不会混入已有档案")
     today = datetime.date.today()

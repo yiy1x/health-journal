@@ -6,6 +6,7 @@ const state = { data: null, route: 'home', query: '', kind: '', department: '', 
 state.aiEngine = 'api';
 const names = { visit: '就诊', observation: '检验指标', medication: '用药', symptom: '症状', condition: '健康问题', reminder: '随访提醒' };
 const routes = [
+  ['wearables', '日常手记', 'bowl'],
   ['home', '健康总览', 'home'], ['departments', '全科室档案', 'heart'], ['timeline', '诊疗时间线', 'timeline'], ['documents', '原始资料', 'folder'], ['trends', '指标趋势', 'chart'], ['care', '用药与症状', 'heart'], ['meals', '饮食计划', 'bowl'], ['assistant', '档案助理', 'spark'], ['summary', '就医摘要', 'file'], ['models', '模型连接', 'spark'], ['settings', '设置与备份', 'settings'],
 ];
 const paths = {
@@ -156,10 +157,11 @@ function render() {
   if (view.route === 'departments') state.specialty = view.department;
   if (view.route === 'care') state.care = view.care;
   state.locationHash = location.hash;
+  if (state.route === 'wearables' && typeof WearableUI !== 'undefined') WearableUI.enter();
   const label = routes.find(item => item[0] === state.route)[1];
   document.title = label + ' · 知己健康手记';
   root.innerHTML = `<aside class="sidebar"><a class="brand" href="#home"><span class="brand-icon">${icon('file')}</span><span><strong>知己</strong><small>健康手记</small></span></a><div class="workspace-label">我的健康空间</div><nav aria-label="主要导航">${routes.map(([id, name, symbol]) => `<a href="#${id}" class="nav-item ${state.route === id ? 'active' : ''}" ${state.route === id ? 'aria-current="page"' : ''}>${icon(symbol)}<span>${name}</span>${id === 'timeline' && records().some(item => item.verification === 'pending' && item.kind !== 'reminder') ? '<span class="nav-dot"></span>' : ''}</a>`).join('')}</nav><div class="sidebar-bottom">${icon('lock')}<div><strong>本地档案 · 云端可选</strong><small>每次外发，先由你确认</small></div></div><div class="sidebar-version">本地版 ${escape(state.data.version)}${state.data.demo ? ' · 合成演示' : ''}</div></aside><div class="workspace"><div class="topbar"><div class="breadcrumb">我的健康空间 <span>/</span> ${label}</div><div class="topbar-right">${state.data.demo ? badge('合成演示档案', 'amber') : ''}<a class="local-indicator" href="#models"><i></i> ${state.data.cloud?.has_key || state.data.codex?.has_key ? '模型已配置 · 按次授权' : '本地模式'}</a><a class="avatar" href="#settings" aria-label="打开个人设置">${escape(state.data.profile.name.slice(0, 1))}</a></div></div><main id="main-content" tabindex="-1">${views[state.route]()}</main><footer class="page-footer"><span>记录事实，保留依据。辅助整理不代替医生。</span><span>${icon('lock')} 档案本地保存，云端分析逐次确认</span></footer></div>`;
-  root.innerHTML += `<nav class="mobile-nav" aria-label="手机导航"><a href="#home" ${state.route === 'home' ? 'aria-current="page"' : ''}>${icon('home')}<span>总览</span></a><a href="#documents" ${state.route === 'documents' ? 'aria-current="page"' : ''}>${icon('folder')}<span>资料</span></a>${button(icon('camera') + '<span>导入</span>', 'upload', '', 'mobile-capture')}<a href="#meals" ${state.route === 'meals' ? 'aria-current="page"' : ''}>${icon('bowl')}<span>饮食</span></a>${button(icon('settings') + '<span>更多</span>', 'mobile-more', '', 'mobile-more')}</nav>`;
+  root.innerHTML += `<nav class="mobile-nav" aria-label="手机导航"><a href="#wearables" ${state.route === 'wearables' ? 'aria-current="page"' : ''}>${icon('heart')}<span>日常</span></a><a href="#documents" ${state.route === 'documents' ? 'aria-current="page"' : ''}>${icon('folder')}<span>资料</span></a>${button(icon('camera') + '<span>导入</span>', 'upload', '', 'mobile-capture')}<a href="#meals" ${state.route === 'meals' ? 'aria-current="page"' : ''}>${icon('bowl')}<span>餐单</span></a>${button(icon('settings') + '<span>更多</span>', 'mobile-more', '', 'mobile-more')}</nav>`;
   const navigation = document.querySelector('.sidebar nav');
   const activeLink = navigation.querySelector('.active');
   if (navigation.scrollWidth > navigation.clientWidth) navigation.scrollLeft = activeLink.offsetLeft - navigation.offsetLeft - (navigation.clientWidth - activeLink.offsetWidth) / 2;
@@ -407,7 +409,7 @@ async function runCloud(approval, engine = 'api', task = state.aiTask) {
   catch (error) { state.aiError = error.message; toast(error.message, true); }
   finally { state.aiBusy = false; state.aiApproval = ''; if (engine === 'codex') await refresh(false).catch(() => {}); if (state.route === 'assistant' || state.route === 'models') render(); }
 }
-const views = { home: homeView, timeline: timelineView, documents: documentWorkspaceView, trends: trendsView, care: careView, meals: mealWorkspaceView, assistant: assistantView, summary: summaryView, settings: settingsView, departments: departmentsView, models: modelsView };
+const views = { home: () => `<a class="daily-home-entry" href="#wearables"><span>${icon('bowl')}<strong>日常手记</strong><small>直接记一餐，也看看今天的步行与休息</small></span>${icon('arrow')}</a>` + homeView(), timeline: timelineView, documents: documentWorkspaceView, trends: trendsView, care: careView, meals: () => `<section class="daily-meal-plan-link"><div><strong>已经吃了？先记下来。</strong><p>“实际吃了什么”和“计划吃什么”分开保存。无需先生成餐单。</p></div><a class="button primary" href="#wearables">打开日常手记 ${icon('arrow')}</a></section>` + mealWorkspaceView(), assistant: assistantView, summary: summaryView, settings: settingsView, departments: departmentsView, models: modelsView, wearables: () => typeof WearableUI === 'undefined' ? empty('请刷新页面', '日常手记模块尚未加载') : WearableUI.view() };
 
 function closeModal() {
   if (state.importBusy) { toast('正在导入原件，请稍候'); return false; }
@@ -611,4 +613,8 @@ modal.addEventListener('click', event => { if (event.target === modal) { const b
 document.querySelector('#leave-cancel').addEventListener('click', () => { leaveModal.close(); state.leaveCallback = null; });
 document.querySelector('#leave-confirm').addEventListener('click', () => { const callback = state.leaveCallback; state.leaveCallback = null; leaveModal.close(); if (callback) callback(); });
 leaveModal.addEventListener('cancel', () => { state.leaveCallback = null; });
+if (typeof WearableUI !== 'undefined') WearableUI.configure({ data: () => state.data, route: () => state.route, request, render, refresh, toast, escape, badge, header, inputField, selectField, openModal, confirmation, canLeave, navigate,
+  modalOpen: () => modal.open, closeSavedModal: () => modal.close(), replaceDay: day => { if (state.route === 'wearables') history.replaceState(null, '', '#wearables?date=' + day); },
+  openPlan: day => { const proceed = () => { state.mealDate = day; navigate('meals'); }; if (canLeave(proceed)) proceed(); },
+});
 refresh().catch(error => { root.innerHTML = `<div class="loading-screen"><h1>暂时无法打开档案</h1><p>${escape(error.message)}</p><p>确认本地服务仍在运行，然后刷新页面。不要删除资料目录。</p></div>`; });

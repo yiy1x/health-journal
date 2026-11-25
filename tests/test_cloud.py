@@ -60,7 +60,7 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(upgraded.documents()[0]["routing"]["status"], "pending")
         self.assertEqual(upgraded.analyses(), [])
         with upgraded.connection() as database:
-            self.assertEqual(database.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(database.execute("PRAGMA user_version").fetchone()[0], 4)
 
     def test_prepare_never_calls_external_api(self):
         with mock.patch("health_journal.cloud.request_completion") as request:

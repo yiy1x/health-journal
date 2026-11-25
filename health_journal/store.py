@@ -14,6 +14,8 @@ import zlib
 
 from .validation import AppError, boolean, identifier, safe_filename, strict_json_constant, timestamp_value, unique_json_object, validate_profile, validate_record
 from .departments import suggest_departments, validate_routing
+from .wearables import SCHEMA as WEARABLE_SCHEMA, export_backup as export_wearable_backup, validate_backup as validate_wearable_backup
+from .food_journal import SCHEMA as FOOD_SCHEMA, FoodJournal, validate_food
 
 
 MAX_FILE = 20 * 1024 * 1024
@@ -62,7 +64,7 @@ class Store:
         self.lock = threading.RLock()
         with self.connection() as database:
             version = database.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2):
+            if version not in (0, 1, 2, 3, 4):
                 raise AppError("数据库版本高于当前程序，请使用相应版本，不要覆盖原库")
             database.executescript("""
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -97,8 +99,8 @@ class Store:
                     provenance TEXT NOT NULL, document_id TEXT REFERENCES documents(id) ON DELETE RESTRICT,
                     intake TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
                 );
-                PRAGMA user_version = 2;
             """)
+            database.executescript(WEARABLE_SCHEMA + FOOD_SCHEMA + "PRAGMA user_version = 4;")
             database.execute("INSERT OR IGNORE INTO settings VALUES (?, ?)", ("profile", encode(DEFAULT_PROFILE)))
             database.execute("INSERT OR IGNORE INTO settings VALUES (?, ?)", ("model", encode("")))
             for doc in database.execute("SELECT * FROM documents WHERE id NOT IN (SELECT document_id FROM document_routes)").fetchall():
@@ -210,7 +212,7 @@ class Store:
 
     def documents(self):
         with self.lock, self.connection() as database:
-            rows = database.execute("SELECT d.*, (SELECT COUNT(*) FROM records r WHERE r.document_id=d.id) AS links, routes.data AS routing_data, routes.version AS routing_version FROM documents d LEFT JOIN document_routes routes ON routes.document_id=d.id ORDER BY created_at DESC,id").fetchall()
+            rows = database.execute("SELECT d.*, ((SELECT COUNT(*) FROM records r WHERE r.document_id=d.id) + (SELECT COUNT(*) FROM food_entries f WHERE f.document_id=d.id)) AS links, routes.data AS routing_data, routes.version AS routing_version FROM documents d LEFT JOIN document_routes routes ON routes.document_id=d.id ORDER BY created_at DESC,id").fetchall()
             documents = []
             for row in rows:
                 item = dict(row)
@@ -320,6 +322,8 @@ class Store:
                     raise AppError("此原件仍被记录引用，请先解除关联，防止丢失依据", 409)
                 if database.execute("SELECT id FROM analyses WHERE document_id=? LIMIT 1", (document_id,)).fetchone():
                     raise AppError("此原件仍被 AI 草稿引用，请先删除对应草稿，防止丢失依据", 409)
+                if database.execute("SELECT id FROM food_entries WHERE document_id=? LIMIT 1", (document_id,)).fetchone():
+                    raise AppError("此原件仍被饮食日记引用，请先编辑日记解除关联", 409)
                 database.execute("DELETE FROM documents WHERE id=?", (document_id,))
                 self.audit(database, "delete", "document", document_id)
             with contextlib.suppress(FileNotFoundError):
@@ -394,12 +398,21 @@ class Store:
         with self.lock:
             documents = self.documents()
             manifest = {"format": "health-journal", "version": 2, "created_at": timestamp(), "demo": bool(self.setting("demo")), "profile": self.profile(), "records": self.records(), "documents": [{key: value for key, value in item.items() if key != "links"} for item in documents], "meal_plans": self.plans(), "analyses": self.analyses()}
+            with self.connection() as database:
+                wearable_bytes = export_wearable_backup(database)
+            if wearable_bytes:
+                manifest.update(version=3, wearable={"path": "wearable.jsonl", "sha256": hashlib.sha256(wearable_bytes).hexdigest()})
+            food_entries = FoodJournal(self).entries()
+            if food_entries:
+                manifest.update(version=4, food_entries=food_entries)
             manifest_bytes = encode(manifest).encode("utf-8")
-            if len(documents) > 500 or len(manifest["records"]) > 10000 or len(manifest["meal_plans"]) > 3660 or len(manifest["analyses"]) > 2000 or len(manifest_bytes) > 4 * 1024 * 1024 or len(manifest_bytes) + sum(item["size"] for item in documents) > MAX_EXPANDED:
+            if len(documents) > 500 or len(manifest["records"]) > 10000 or len(manifest["meal_plans"]) > 3660 or len(manifest["analyses"]) > 2000 or len(manifest_bytes) > 4 * 1024 * 1024 or len(wearable_bytes) + len(manifest_bytes) + sum(item["size"] for item in documents) > MAX_EXPANDED:
                 raise AppError("超出便携 ZIP 恢复范围（解压后 60 MB、500 份原件、10000 条记录）。请停止应用后完整复制资料目录进行备份，不要删除原件", 413)
             output = io.BytesIO()
             with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr("manifest.json", manifest_bytes)
+                if wearable_bytes:
+                    archive.writestr("wearable.jsonl", wearable_bytes)
                 for document in documents:
                     metadata, content = self.get_document(document["id"])
                     archive.writestr("attachments/" + metadata["sha256"], content)
@@ -414,19 +427,20 @@ class Store:
         from .cloud import validate_analysis
         if len(content) > MAX_BACKUP:
             raise AppError("备份超过 64 MB 限制", 413)
+        wearable_database = None
         try:
             archive = zipfile.ZipFile(io.BytesIO(content))
             with archive:
                 infos = archive.infolist()
                 names = [entry.filename for entry in infos]
-                if len(infos) > 501 or len(names) != len(set(names)) or sum(entry.file_size for entry in infos) > MAX_EXPANDED:
+                if len(infos) > 502 or len(names) != len(set(names)) or sum(entry.file_size for entry in infos) > MAX_EXPANDED:
                     raise AppError("备份条目重复、过多或解压后超过限制")
                 if "manifest.json" not in names or archive.getinfo("manifest.json").file_size > 4 * 1024 * 1024:
                     raise AppError("备份清单缺失或过大")
                 manifest = json.loads(archive.read("manifest.json"), parse_constant=strict_json_constant, object_pairs_hook=unique_json_object)
-                if manifest.get("format") != "health-journal" or type(manifest.get("version")) is not int or manifest["version"] not in (1, 2):
+                if manifest.get("format") != "health-journal" or type(manifest.get("version")) is not int or manifest["version"] not in (1, 2, 3, 4):
                     raise AppError("不支持的备份格式或版本")
-                if manifest["version"] == 2 and "analyses" not in manifest:
+                if manifest["version"] >= 2 and "analyses" not in manifest:
                     raise AppError("v2 备份缺少分析草稿清单，拒绝不完整恢复")
                 demo = boolean(manifest.get("demo", False), "演示标记")
                 profile = validate_profile(manifest["profile"])
@@ -441,8 +455,12 @@ class Store:
                 approved_docs, approved_records, approved_plans = [], [], []
                 ids, digests, record_ids, plan_dates = set(), set(), set(), set()
                 approved_routes, approved_analyses = {}, []
+                approved_food, food_ids = [], set()
+                food_entries = manifest.get("food_entries", [])
+                if manifest["version"] == 4 and "food_entries" not in manifest or manifest["version"] < 4 and "food_entries" in manifest or not isinstance(food_entries, list) or len(food_entries) > 10000:
+                    raise AppError("饮食日记备份清单缺失、数量过多或版本不兼容")
                 for item in docs:
-                    if manifest["version"] == 2 and ("routing" not in item or "routing_version" not in item):
+                    if manifest["version"] >= 2 and ("routing" not in item or "routing_version" not in item):
                         raise AppError("v2 备份缺少科室关联信息")
                     document_id = identifier(item["id"])
                     digest = item["sha256"]
@@ -460,7 +478,8 @@ class Store:
                     if type(route_version) is not int or not 1 <= route_version <= 1000000000:
                         raise AppError("科室分类版本无效")
                     approved_routes[document_id] = (routing, route_version)
-                if set(names) != {"manifest.json"} | {"attachments/" + digest for digest in digests}:
+                has_wearables = manifest["version"] == 3 or manifest["version"] == 4 and "wearable" in manifest
+                if set(names) != {"manifest.json"} | {"attachments/" + digest for digest in digests} | ({"wearable.jsonl"} if has_wearables else set()):
                     raise AppError("备份包含不允许的路径或额外文件")
                 for item in records:
                     clean = validate_record(item)
@@ -493,6 +512,20 @@ class Store:
                             raise AppError("分析草稿来源与原件不匹配")
                     analysis_ids.add(clean["id"])
                     approved_analyses.append(clean)
+                for item in food_entries:
+                    clean = validate_food(item, saved=True)
+                    if clean["id"] in food_ids or clean["document_id"] and clean["document_id"] not in ids:
+                        raise AppError("饮食日记标识重复或缺少关联原件")
+                    food_ids.add(clean["id"])
+                    approved_food.append(clean)
+                if has_wearables:
+                    metadata = manifest["wearable"]
+                    if not isinstance(metadata, dict) or set(metadata) != {"path", "sha256"} or metadata["path"] != "wearable.jsonl" or archive.getinfo("wearable.jsonl").file_size > 40 * 1024 * 1024:
+                        raise AppError("健康样本备份清单无效")
+                    wearable_bytes = archive.read("wearable.jsonl")
+                    if hashlib.sha256(wearable_bytes).hexdigest() != metadata["sha256"]:
+                        raise AppError("健康样本备份校验失败")
+                    wearable_database = validate_wearable_backup(wearable_bytes)
         except AppError:
             raise
         except (zipfile.BadZipFile, zlib.error, KeyError, ValueError, TypeError, AttributeError, RuntimeError, NotImplementedError, EOFError, RecursionError):
@@ -501,7 +534,7 @@ class Store:
         with self.lock:
             try:
                 with self.connection() as database:
-                    occupied = any(database.execute("SELECT COUNT(*) FROM " + table).fetchone()[0] for table in ("records", "documents", "meal_plans", "analyses"))
+                    occupied = any(database.execute("SELECT COUNT(*) FROM " + table).fetchone()[0] for table in ("records", "documents", "meal_plans", "analyses", "wearable_samples", "wearable_batches", "food_entries"))
                     existing_profile = json.loads(database.execute("SELECT value FROM settings WHERE key='profile'").fetchone()[0])
                     if occupied or existing_profile != DEFAULT_PROFILE:
                         raise AppError("为避免覆盖资料，只能恢复到全新空档案。请以新的 --data-dir 启动后恢复", 409)
@@ -518,6 +551,11 @@ class Store:
                         database.execute("INSERT INTO meal_plans VALUES (?,?,?)", (plan["date"], encode(plan), timestamp()))
                     for item in approved_analyses:
                         self.insert_analysis(database, item)
+                    for item in approved_food:
+                        FoodJournal.insert(database, item)
+                    if wearable_database:
+                        for table, columns in (("wearable_batches", 6), ("wearable_samples", 16), ("wearable_members", 2)):
+                            database.executemany("INSERT INTO " + table + " VALUES (" + ",".join("?" for column in range(columns)) + ")", wearable_database.execute("SELECT * FROM " + table))
                     database.execute("UPDATE settings SET value=? WHERE key='profile'", (encode(profile),))
                     database.execute("INSERT OR REPLACE INTO settings VALUES ('demo',?)", (encode(demo),))
                     self.audit(database, "restore", "backup", "validated")
@@ -526,4 +564,7 @@ class Store:
                     with contextlib.suppress(FileNotFoundError):
                         path.unlink()
                 raise
-        return {"records": len(approved_records), "documents": len(approved_docs), "meal_plans": len(approved_plans), "analyses": len(approved_analyses)}
+            finally:
+                if wearable_database:
+                    wearable_database.close()
+        return {"records": len(approved_records), "documents": len(approved_docs), "meal_plans": len(approved_plans), "analyses": len(approved_analyses), "food_entries": len(approved_food)}
